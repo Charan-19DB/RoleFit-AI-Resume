@@ -19,66 +19,103 @@ export class ChartRenderer {
 
     // Color based on verdict
     let strokeColor = '#00a884'; // green
-    if (score < 50) strokeColor = '#f87171'; // red
-    else if (score < 75) strokeColor = '#fbbf24'; // yellow
+    let glowColor = 'rgba(0, 168, 132, 0.25)';
+    if (score < 50) {
+      strokeColor = '#f87171'; // red
+      glowColor = 'rgba(248, 113, 113, 0.25)';
+    } else if (score < 75) {
+      strokeColor = '#fbbf24'; // yellow
+      glowColor = 'rgba(251, 191, 36, 0.25)';
+    }
 
     const svg = `
-      <svg width="600" height="380" viewBox="0 0 600 380" xmlns="http://www.w3.org/2000/svg">
-        <rect width="600" height="380" rx="16" fill="#121b22"/>
+      <svg width="800" height="460" viewBox="0 0 800 460" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <linearGradient id="bgGrad" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="#0b141a"/>
+            <stop offset="100%" stop-color="#111b21"/>
+          </linearGradient>
+          <linearGradient id="meterGrad" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="${strokeColor}"/>
+            <stop offset="100%" stop-color="${strokeColor}dd"/>
+          </linearGradient>
+          <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+            <feDropShadow dx="0" dy="0" stdDeviation="6" flood-color="${strokeColor}" flood-opacity="0.35"/>
+          </filter>
+        </defs>
+
+        <!-- Card Background -->
+        <rect width="800" height="460" rx="20" fill="url(#bgGrad)" stroke="#222e35" stroke-width="1.5"/>
         
         <!-- Header -->
-        <text x="32" y="42" fill="#8696a0" font-family="-apple-system, sans-serif" font-size="13" font-weight="600" letter-spacing="1">ROLEFIT ATS SCORE REPORT</text>
-        <text x="32" y="70" fill="#e9edef" font-family="-apple-system, sans-serif" font-size="18" font-weight="700">${this.escapeXml(review.candidateName)} vs ${this.escapeXml(jdTitle.slice(0, 30))}</text>
-        <line x1="32" y1="88" x2="568" y2="88" stroke="#2a3942" stroke-width="1"/>
-
-        <!-- Left: Radial Gauge -->
-        <g transform="translate(130, 230)">
-          <!-- Background track -->
-          <circle cx="0" cy="0" r="75" fill="none" stroke="#222e35" stroke-width="14"/>
-          <!-- Active fill -->
-          <circle cx="0" cy="0" r="75" fill="none" stroke="${strokeColor}" stroke-width="14"
-            stroke-dasharray="${circum.toFixed(1)}" stroke-dashoffset="${strokeOffset.toFixed(1)}"
-            stroke-linecap="round" transform="rotate(-90)"/>
-          
-          <text x="0" y="8" text-anchor="middle" fill="#ffffff" font-family="-apple-system, sans-serif" font-size="38" font-weight="800">${score}%</text>
-          <text x="0" y="32" text-anchor="middle" fill="#8696a0" font-family="-apple-system, sans-serif" font-size="13" font-weight="600">${this.escapeXml(verdict.toUpperCase())}</text>
+        <g transform="translate(44, 46)">
+          <text x="0" y="0" fill="#00a884" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="12" font-weight="700" letter-spacing="1.5">ROLEFIT ATS INTELLIGENCE</text>
+          <text x="0" y="28" fill="#ffffff" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="22" font-weight="800">${this.escapeXml(review.candidateName)}</text>
+          <text x="0" y="52" fill="#8696a0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="14" font-weight="500">Target Role: ${this.escapeXml(jdTitle.slice(0, 42))}</text>
+          <line x1="0" y1="70" x2="712" y2="70" stroke="#222e35" stroke-width="1.5"/>
         </g>
 
-        <!-- Right: Parameter Breakdown Bars -->
-        <g transform="translate(280, 115)">
-          <text x="0" y="20" fill="#8696a0" font-family="-apple-system, sans-serif" font-size="12" font-weight="600" letter-spacing="0.5">MATCH PARAMETERS</text>
+        <!-- Left: Radial Gauge Meter -->
+        <g transform="translate(180, 275)">
+          <!-- Outer subtle ring -->
+          <circle cx="0" cy="0" r="96" fill="none" stroke="#1f2c34" stroke-width="2" stroke-dasharray="4 4"/>
+          <!-- Background track -->
+          <circle cx="0" cy="0" r="80" fill="none" stroke="#1f2c34" stroke-width="16"/>
+          <!-- Active fill -->
+          <circle cx="0" cy="0" r="80" fill="none" stroke="url(#meterGrad)" stroke-width="16"
+            stroke-dasharray="${(2 * Math.PI * 80).toFixed(1)}"
+            stroke-dashoffset="${((2 * Math.PI * 80) - (score / 100) * (2 * Math.PI * 80)).toFixed(1)}"
+            stroke-linecap="round" transform="rotate(-90)" filter="url(#glow)"/>
+          
+          <text x="0" y="10" text-anchor="middle" fill="#ffffff" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="44" font-weight="800">${score}%</text>
+          <text x="0" y="38" text-anchor="middle" fill="${strokeColor}" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="13" font-weight="700" letter-spacing="0.5">${this.escapeXml(verdict.toUpperCase())}</text>
+        </g>
+
+        <!-- Right: 4 ATS Parameter Progress Bars -->
+        <g transform="translate(360, 155)">
+          <text x="0" y="0" fill="#8696a0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="12" font-weight="700" letter-spacing="1">ATS MATCH PARAMETERS</text>
           
           <!-- Skills Bar -->
-          <text x="0" y="52" fill="#e9edef" font-family="-apple-system, sans-serif" font-size="13">Skills Alignment</text>
-          <text x="270" y="52" text-anchor="end" fill="#00a884" font-family="-apple-system, sans-serif" font-size="13" font-weight="700">${skills}%</text>
-          <rect x="0" y="60" width="270" height="6" rx="3" fill="#222e35"/>
-          <rect x="0" y="60" width="${Math.round(270 * (skills / 100))}" height="6" rx="3" fill="#00a884"/>
+          <g transform="translate(0, 24)">
+            <text x="0" y="14" fill="#e9edef" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="14" font-weight="600">Skills Alignment</text>
+            <text x="390" y="14" text-anchor="end" fill="#00a884" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="14" font-weight="700">${skills}%</text>
+            <rect x="0" y="24" width="390" height="8" rx="4" fill="#1f2c34"/>
+            <rect x="0" y="24" width="${Math.round(390 * (skills / 100))}" height="8" rx="4" fill="#00a884"/>
+          </g>
 
           <!-- Experience Bar -->
-          <text x="0" y="92" fill="#e9edef" font-family="-apple-system, sans-serif" font-size="13">Experience Match</text>
-          <text x="270" y="92" text-anchor="end" fill="#53bdeb" font-family="-apple-system, sans-serif" font-size="13" font-weight="700">${exp}%</text>
-          <rect x="0" y="100" width="270" height="6" rx="3" fill="#222e35"/>
-          <rect x="0" y="100" width="${Math.round(270 * (exp / 100))}" height="6" rx="3" fill="#53bdeb"/>
+          <g transform="translate(0, 72)">
+            <text x="0" y="14" fill="#e9edef" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="14" font-weight="600">Experience Match</text>
+            <text x="390" y="14" text-anchor="end" fill="#53bdeb" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="14" font-weight="700">${exp}%</text>
+            <rect x="0" y="24" width="390" height="8" rx="4" fill="#1f2c34"/>
+            <rect x="0" y="24" width="${Math.round(390 * (exp / 100))}" height="8" rx="4" fill="#53bdeb"/>
+          </g>
 
           <!-- Keywords Bar -->
-          <text x="0" y="132" fill="#e9edef" font-family="-apple-system, sans-serif" font-size="13">Keyword Evidence</text>
-          <text x="270" y="132" text-anchor="end" fill="#a855f7" font-family="-apple-system, sans-serif" font-size="13" font-weight="700">${kw}%</text>
-          <rect x="0" y="140" width="270" height="6" rx="3" fill="#222e35"/>
-          <rect x="0" y="140" width="${Math.round(270 * (kw / 100))}" height="6" rx="3" fill="#a855f7"/>
+          <g transform="translate(0, 120)">
+            <text x="0" y="14" fill="#e9edef" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="14" font-weight="600">Keyword Evidence</text>
+            <text x="390" y="14" text-anchor="end" fill="#a855f7" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="14" font-weight="700">${kw}%</text>
+            <rect x="0" y="24" width="390" height="8" rx="4" fill="#1f2c34"/>
+            <rect x="0" y="24" width="${Math.round(390 * (kw / 100))}" height="8" rx="4" fill="#a855f7"/>
+          </g>
 
           <!-- ATS Formatting Bar -->
-          <text x="0" y="172" fill="#e9edef" font-family="-apple-system, sans-serif" font-size="13">ATS Parseability</text>
-          <text x="270" y="172" text-anchor="end" fill="#34d399" font-family="-apple-system, sans-serif" font-size="13" font-weight="700">${format}%</text>
-          <rect x="0" y="180" width="270" height="6" rx="3" fill="#222e35"/>
-          <rect x="0" y="180" width="${Math.round(270 * (format / 100))}" height="6" rx="3" fill="#34d399"/>
+          <g transform="translate(0, 168)">
+            <text x="0" y="14" fill="#e9edef" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="14" font-weight="600">ATS Parseability</text>
+            <text x="390" y="14" text-anchor="end" fill="#34d399" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="14" font-weight="700">${format}%</text>
+            <rect x="0" y="24" width="390" height="8" rx="4" fill="#1f2c34"/>
+            <rect x="0" y="24" width="${Math.round(390 * (format / 100))}" height="8" rx="4" fill="#34d399"/>
+          </g>
         </g>
 
         <!-- Footer watermark -->
-        <text x="32" y="356" fill="#667781" font-family="-apple-system, sans-serif" font-size="11">Generated by RoleFit AI · Truth-First Resume Review</text>
+        <g transform="translate(44, 430)">
+          <text x="0" y="0" fill="#667781" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="11" font-weight="500">Recruiter Intelligence · Truth-First Review · Generated by RoleFit AI</text>
+        </g>
       </svg>
     `;
 
-    const resvg = new Resvg(svg, { fitTo: { mode: 'width', value: 600 } });
+    const resvg = new Resvg(svg, { fitTo: { mode: 'width', value: 800 } });
     return resvg.render().asPng();
   }
 

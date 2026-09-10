@@ -7,6 +7,28 @@ import { SessionStore } from '../services/sessionStore.js';
 import { ChartRenderer } from '../services/chartRenderer.js';
 import { ClassifierService } from '../services/classifierService.js';
 
+function escapeHtml(text?: string): string {
+  if (!text) return '';
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function renderProgressBar(score: number): string {
+  const filled = Math.min(10, Math.max(0, Math.round(score / 10)));
+  const empty = 10 - filled;
+  return '█'.repeat(filled) + '░'.repeat(empty);
+}
+
+function getScoreBadge(score: number): string {
+  if (score >= 80) return '🟢';
+  if (score >= 60) return '🟡';
+  return '🔴';
+}
+
 export function setupTelegramBot(
   token: string | undefined,
   geminiService: GeminiService
@@ -35,38 +57,49 @@ export function setupTelegramBot(
     const sessionId = `tg-${ctx.chat.id}-${Date.now()}`;
     chatSessions.set(ctx.chat.id, sessionId);
 
-    await ctx.reply(
-      `👋 *Welcome to RoleFit — Your Recruiter & Career Reviewer*\n\n` +
-      `"Your resume. Their requirements. One honest review."\n\n` +
-      `To begin, send me the *Job Description*:\n` +
-      `📝 Paste the JD as text\n` +
-      `📄 Or upload a PDF / DOCX file`,
-      {
-        parse_mode: 'Markdown',
-        ...Markup.keyboard([
-          ['📝 Paste JD Text', '📄 Upload JD File'],
-          ['🔄 Start New Review'],
-        ]).resize(),
-      }
-    );
+    const welcome = [
+      `👋 <b>Welcome to RoleFit AI — Recruiter & Career Intelligence</b>`,
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+      `<i>"Your resume. Their requirements. One honest review."</i>`,
+      ``,
+      `🎯 <b>How it works:</b>`,
+      `You can give input in <b>ANY order</b>:`,
+      `• Send your <b>Resume</b> first, then the <b>JD</b>`,
+      `• Or send the <b>JD</b> first, then your <b>Resume</b>`,
+      ``,
+      `📁 <b>Accepted formats:</b>`,
+      `• PDF or DOCX file attachments`,
+      `• Or paste text directly into chat`,
+      ``,
+      `👉 Send your first document or text below to begin!`,
+    ].join('\n');
+
+    await ctx.reply(welcome, {
+      parse_mode: 'HTML',
+      ...Markup.keyboard([
+        ['📄 Send Resume', '📝 Send Job Description'],
+        ['🔄 Start Fresh Review'],
+      ]).resize(),
+    });
   });
 
   // /new command
   bot.command('new', async (ctx) => {
     const sessionId = `tg-${ctx.chat.id}-${Date.now()}`;
     chatSessions.set(ctx.chat.id, sessionId);
-    await ctx.reply('🔄 *New session started.* Send me a Job Description (text or PDF/DOCX) to begin.', {
-      parse_mode: 'Markdown',
-    });
+    await ctx.reply(
+      `🔄 <b>Fresh Review Session Started</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━\nPlease send a <b>Resume</b> or a <b>Job Description</b> (file or text) to begin.`,
+      { parse_mode: 'HTML' }
+    );
   });
 
-  // Handle document uploads (JD or Resume)
+  // Handle document uploads (PDF, DOCX, etc.)
   bot.on('document', async (ctx) => {
     const doc = ctx.message.document;
     const chatId = ctx.chat.id;
     const sessionId = getSessionId(chatId);
 
-    const statusMsg = await ctx.reply('📄 Downloading and reading document...');
+    const statusMsg = await ctx.reply('⏳ <i>Downloading and parsing document...</i>', { parse_mode: 'HTML' });
 
     try {
       const fileUrl = await ctx.telegram.getFileLink(doc.file_id);
@@ -77,36 +110,54 @@ export function setupTelegramBot(
       const filename = doc.file_name || 'document.pdf';
 
       const extractedText = await DocumentParser.extractText(buffer, mimeType, filename);
-
-      const classification = ClassifierService.classify(extractedText, filename);
       const session = await SessionStore.getSession(sessionId);
+
+      const classification = ClassifierService.classify(extractedText, filename, {
+        hasActiveJD: !!session.jdProfile,
+        hasPendingResumes: (session.pendingResumes?.length || 0) > 0,
+      });
 
       if (classification === 'RESUME') {
         const candidateName = filename.replace(/\.(pdf|docx|txt)$/i, '').replace(/[-_]/g, ' ');
 
         if (session.jdProfile) {
-          await ctx.telegram.editMessageText(chatId, statusMsg.message_id, undefined, `🔍 Evaluating "${candidateName}" against "${session.jdProfile.jobTitle}"...`);
+          await ctx.telegram.editMessageText(
+            chatId,
+            statusMsg.message_id,
+            undefined,
+            `🔍 <i>Evaluating <b>${escapeHtml(candidateName)}</b> against <b>${escapeHtml(session.jdProfile.jobTitle)}</b>...</i>`,
+            { parse_mode: 'HTML' }
+          );
           const review = await geminiService.analyzeCandidateResume(session.jdProfile, extractedText, candidateName, filename);
           await SessionStore.addCandidateReview(sessionId, review);
-          await ctx.telegram.editMessageText(chatId, statusMsg.message_id, undefined, '✅ Analysis complete!');
+          await ctx.telegram.deleteMessage(chatId, statusMsg.message_id).catch(() => {});
           await sendReviewMessage(ctx, review, session);
         } else {
           if (!session.pendingResumes) session.pendingResumes = [];
           session.pendingResumes.push({ text: extractedText, filename, candidateName });
           await SessionStore.saveSession(session);
-          await ctx.telegram.editMessageText(
-            chatId,
-            statusMsg.message_id,
-            undefined,
-            `📄 *Resume received for ${candidateName}!*\n\n👉 Now send or paste the *Job Description* to match against.`,
-            { parse_mode: 'Markdown' }
-          );
+
+          const msg = [
+            `📄 <b>Resume Received: ${escapeHtml(candidateName)}</b>`,
+            `━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+            `✅ Successfully parsed candidate resume.`,
+            ``,
+            `👉 <b>Next Step:</b> Now send or paste the <b>Job Description</b> to match against this resume!`,
+          ].join('\n');
+
+          await ctx.telegram.editMessageText(chatId, statusMsg.message_id, undefined, msg, { parse_mode: 'HTML' });
         }
         return;
       }
 
       // If document is a JD
-      await ctx.telegram.editMessageText(chatId, statusMsg.message_id, undefined, '🧠 Understanding role and core requirements...');
+      await ctx.telegram.editMessageText(
+        chatId,
+        statusMsg.message_id,
+        undefined,
+        '🧠 <i>Extracting role requirements & core tech stack...</i>',
+        { parse_mode: 'HTML' }
+      );
       const profile = await geminiService.analyzeJobDescription(extractedText);
       await SessionStore.setJDProfile(sessionId, profile);
 
@@ -115,8 +166,8 @@ export function setupTelegramBot(
           chatId,
           statusMsg.message_id,
           undefined,
-          `✅ *Job Description Received:* ${profile.jobTitle}\n\n🔍 Automatically evaluating your previously uploaded resume...`,
-          { parse_mode: 'Markdown' }
+          `✅ <b>Job Description Analyzed: ${escapeHtml(profile.jobTitle)}</b>\n🔍 <i>Matching your previously uploaded resume...</i>`,
+          { parse_mode: 'HTML' }
         );
         for (const pending of session.pendingResumes) {
           const review = await geminiService.analyzeCandidateResume(profile, pending.text, pending.candidateName, pending.filename);
@@ -126,16 +177,25 @@ export function setupTelegramBot(
         session.pendingResumes = [];
         await SessionStore.saveSession(session);
       } else {
-        await ctx.telegram.editMessageText(
-          chatId,
-          statusMsg.message_id,
-          undefined,
-          `✅ *Job Description Received:* ${profile.jobTitle}\n\n👉 Now upload your *Candidate Resume* (PDF or DOCX).`,
-          { parse_mode: 'Markdown' }
-        );
+        const msg = [
+          `📋 <b>Job Description Analyzed</b>`,
+          `━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+          `🎯 <b>Role:</b> <b>${escapeHtml(profile.jobTitle)}</b>`,
+          `🛠️ <b>Primary Stack:</b> ${escapeHtml(profile.primaryTechnologies.join(', '))}`,
+          ``,
+          `👉 <b>Next Step:</b> Now upload your <b>Candidate Resume</b> (PDF or DOCX file)!`,
+        ].join('\n');
+
+        await ctx.telegram.editMessageText(chatId, statusMsg.message_id, undefined, msg, { parse_mode: 'HTML' });
       }
     } catch (err: any) {
-      await ctx.telegram.editMessageText(chatId, statusMsg.message_id, undefined, `⚠️ Error processing document: ${err.message}`);
+      await ctx.telegram.editMessageText(
+        chatId,
+        statusMsg.message_id,
+        undefined,
+        `⚠️ <b>Error processing document:</b> ${escapeHtml(err.message)}`,
+        { parse_mode: 'HTML' }
+      );
     }
   });
 
@@ -145,37 +205,77 @@ export function setupTelegramBot(
     const chatId = ctx.chat.id;
     const sessionId = getSessionId(chatId);
 
-    if (text === '🔄 Start New Review') {
+    if (text === '🔄 Start Fresh Review') {
       chatSessions.set(chatId, `tg-${chatId}-${Date.now()}`);
-      return ctx.reply('🔄 Fresh review started. Please send either a Job Description or a Resume (text or file).');
+      return ctx.reply(
+        `🔄 <b>Fresh Review Started</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━\nPlease send either a <b>Resume</b> or a <b>Job Description</b> (paste text or attach file).`,
+        { parse_mode: 'HTML' }
+      );
     }
-    if (text === '📝 Paste JD Text' || text === '📄 Upload JD File') {
-      return ctx.reply('Please paste the text directly into chat, or send a PDF/DOCX file.');
+    if (text === '📄 Send Resume' || text === '📝 Send Job Description') {
+      return ctx.reply(
+        `📎 <b>Ready for your input</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━\nYou can attach a PDF/DOCX file directly or paste the text in chat!`,
+        { parse_mode: 'HTML' }
+      );
     }
 
     const session = await SessionStore.getSession(sessionId);
+    const candidateList = Object.values(session.candidates);
 
-    // If text is substantive (> 60 chars), classify it dynamically
-    if (text.length >= 60) {
-      const classification = ClassifierService.classify(text);
+    // If candidate review exists and text looks like a question, treat as conversational follow-up
+    if (session.jdProfile && candidateList.length > 0 && ClassifierService.isChatMessage(text)) {
+      const latestCandidate = candidateList[candidateList.length - 1];
+      const typingMsg = await ctx.reply('💭 <i>Consulting recruiter intelligence...</i>', { parse_mode: 'HTML' });
+
+      const reply = await geminiService.answerFollowUp(
+        session.jdProfile,
+        latestCandidate,
+        text,
+        session.messages.map((m) => ({ role: m.role, content: m.content }))
+      );
+
+      const formattedReply = [
+        `💡 <b>Recruiter Guidance</b>`,
+        `━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+        escapeHtml(reply),
+      ].join('\n');
+
+      await ctx.telegram.editMessageText(chatId, typingMsg.message_id, undefined, formattedReply, { parse_mode: 'HTML' });
+      return;
+    }
+
+    // Substantive text (> 50 chars)
+    if (text.length >= 50) {
+      const classification = ClassifierService.classify(text, undefined, {
+        hasActiveJD: !!session.jdProfile,
+        hasPendingResumes: (session.pendingResumes?.length || 0) > 0,
+      });
 
       if (classification === 'RESUME') {
         if (session.jdProfile) {
-          const statusMsg = await ctx.reply('🔍 Evaluating resume against active Job Description...');
+          const statusMsg = await ctx.reply('🔍 <i>Evaluating resume against active Job Description...</i>', { parse_mode: 'HTML' });
           const review = await geminiService.analyzeCandidateResume(session.jdProfile, text, 'Candidate');
           await SessionStore.addCandidateReview(sessionId, review);
-          await ctx.telegram.editMessageText(chatId, statusMsg.message_id, undefined, '✅ Analysis complete!');
+          await ctx.telegram.deleteMessage(chatId, statusMsg.message_id).catch(() => {});
           await sendReviewMessage(ctx, review, session);
           return;
         } else {
           if (!session.pendingResumes) session.pendingResumes = [];
           session.pendingResumes.push({ text, filename: 'resume.txt', candidateName: 'Candidate' });
           await SessionStore.saveSession(session);
-          return ctx.reply('📄 *Resume received!*\n\n👉 Now please paste or upload the *Job Description* to match against.', { parse_mode: 'Markdown' });
+
+          const msg = [
+            `📄 <b>Resume Text Received</b>`,
+            `━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+            `✅ Successfully saved candidate resume.`,
+            ``,
+            `👉 <b>Next Step:</b> Now paste or upload the <b>Job Description</b> to match against!`,
+          ].join('\n');
+          return ctx.reply(msg, { parse_mode: 'HTML' });
         }
       } else {
         // Text is a JD
-        const statusMsg = await ctx.reply('🧠 Reading and analyzing Job Description...');
+        const statusMsg = await ctx.reply('🧠 <i>Reading and analyzing Job Description...</i>', { parse_mode: 'HTML' });
         const profile = await geminiService.analyzeJobDescription(text);
         await SessionStore.setJDProfile(sessionId, profile);
 
@@ -184,8 +284,8 @@ export function setupTelegramBot(
             chatId,
             statusMsg.message_id,
             undefined,
-            `✅ *Job Description Received:* ${profile.jobTitle}\n\n🔍 Automatically evaluating your previously uploaded resume...`,
-            { parse_mode: 'Markdown' }
+            `✅ <b>Job Description Analyzed: ${escapeHtml(profile.jobTitle)}</b>\n🔍 <i>Matching your previously submitted resume...</i>`,
+            { parse_mode: 'HTML' }
           );
           for (const pending of session.pendingResumes) {
             const review = await geminiService.analyzeCandidateResume(profile, pending.text, pending.candidateName, pending.filename);
@@ -196,48 +296,36 @@ export function setupTelegramBot(
           await SessionStore.saveSession(session);
           return;
         } else {
-          await ctx.telegram.editMessageText(
-            chatId,
-            statusMsg.message_id,
-            undefined,
-            `✅ *Job Description Received:* ${profile.jobTitle}\n\n👉 Now upload or paste your *Candidate Resume*.`,
-            { parse_mode: 'Markdown' }
-          );
+          const msg = [
+            `📋 <b>Job Description Analyzed</b>`,
+            `━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+            `🎯 <b>Role:</b> <b>${escapeHtml(profile.jobTitle)}</b>`,
+            `🛠️ <b>Primary Stack:</b> ${escapeHtml(profile.primaryTechnologies.join(', '))}`,
+            ``,
+            `👉 <b>Next Step:</b> Now send or paste your <b>Candidate Resume</b>!`,
+          ].join('\n');
+
+          await ctx.telegram.editMessageText(chatId, statusMsg.message_id, undefined, msg, { parse_mode: 'HTML' });
           return;
         }
       }
     }
-    // If candidate review already exists, treat as conversational follow-up
-    const candidateList = Object.values(session.candidates);
-    if (session.jdProfile && candidateList.length > 0) {
-      const latestCandidate = candidateList[candidateList.length - 1];
-      const typingMsg = await ctx.reply('💭 Reviewing your application context...');
 
-      const reply = await geminiService.answerFollowUp(
-        session.jdProfile,
-        latestCandidate,
-        text,
-        session.messages.map((m) => ({ role: m.role, content: m.content }))
-      );
-
-      await ctx.telegram.editMessageText(chatId, typingMsg.message_id, undefined, reply);
-      return;
-    }
-
-    // Default guidance
+    // Default guidance for short or ambiguous input
     if (!session.jdProfile) {
       await ctx.reply(
-        'Please send a Job Description first (paste at least 80 characters of text or upload a PDF/DOCX) so we can evaluate resumes accurately.'
+        `👋 <b>Ready for Review</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━\nPlease send a <b>Job Description</b> or a <b>Resume</b> (file attachment or paste text).`,
+        { parse_mode: 'HTML' }
       );
     } else {
       await ctx.reply(
-        `I have the JD for *${session.jdProfile.jobTitle}*. Please upload a candidate resume (PDF or DOCX) to get an honest review.`,
-        { parse_mode: 'Markdown' }
+        `🎯 Active Role: <b>${escapeHtml(session.jdProfile.jobTitle)}</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━\nPlease upload or paste a <b>Candidate Resume</b> to get an instant review!`,
+        { parse_mode: 'HTML' }
       );
     }
   });
 
-  // Action callbacks
+  // Action callback: Detailed Bullet Rewrites
   bot.action('action_rewrites', async (ctx) => {
     await ctx.answerCbQuery();
     const sessionId = getSessionId(ctx.chat!.id);
@@ -250,16 +338,22 @@ export function setupTelegramBot(
     if (rewrites.length === 0) return ctx.reply('No bullet rewrites available.');
 
     const msg = [
-      '📝 *Suggested Bullet Rewrites (Truth-First)*',
-      '',
-      ...rewrites.map(
-        (r) => `*Before:*\n"${r.before}"\n\n*Suggested:*\n"${r.after}"\n\n_${r.guidance}_\n`
-      ),
+      `📝 <b>TRUTH-FIRST BULLET REWRITES FOR ${escapeHtml(c.candidateName.toUpperCase())}</b>`,
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+      ``,
+      ...rewrites.map((r, i) => [
+        `<b>${i + 1}. ${escapeHtml(r.section || 'Experience')} Section</b>`,
+        `🔴 <b>Before:</b> <i>"${escapeHtml(r.before)}"</i>`,
+        `🟢 <b>Suggested:</b> <i>"${escapeHtml(r.after)}"</i>`,
+        `💡 <b>Recruiter Guidance:</b> <i>${escapeHtml(r.guidance)}</i>`,
+        `───────────────────────────`,
+      ].join('\n')),
     ].join('\n');
 
-    await ctx.reply(msg, { parse_mode: 'Markdown' });
+    await ctx.reply(msg, { parse_mode: 'HTML' });
   });
 
+  // Action callback: Complete Learning Roadmap
   bot.action('action_learning', async (ctx) => {
     await ctx.answerCbQuery();
     const sessionId = getSessionId(ctx.chat!.id);
@@ -269,85 +363,171 @@ export function setupTelegramBot(
 
     const c = candidates[candidates.length - 1];
     const learning = c.learningPlan;
-    if (learning.length === 0) return ctx.reply('No urgent learning gaps found!');
+    if (learning.length === 0) return ctx.reply('No urgent learning gaps found for this role!');
 
     const msg = [
-      '📚 *What to Learn Next (Ordered by Role Priority)*',
-      '',
-      ...learning.map((l, i) => `${i + 1}. *${l.topic}* [${l.priority} Priority]\n   ${l.reason}\n`),
+      `📚 <b>PRIORITY LEARNING ROADMAP</b>`,
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+      `👤 <b>Candidate:</b> ${escapeHtml(c.candidateName)}`,
+      `🎯 <b>Target Role:</b> ${escapeHtml(session.jdProfile?.jobTitle || 'Role')}`,
+      ``,
+      ...learning.map((l, i) => {
+        const badge = l.priority === 'CRITICAL' ? '🔴 [CRITICAL]' : l.priority === 'HIGH' ? '🟠 [HIGH]' : '🟡 [MEDIUM]';
+        return [
+          `<b>${i + 1}. ${escapeHtml(l.topic)}</b> ${badge}`,
+          `🎯 <b>Required for:</b> ${escapeHtml(l.jdRequirement || 'Core requirement')}`,
+          `💡 <b>Why:</b> <i>${escapeHtml(l.reason)}</i>`,
+          `───────────────────────────`,
+        ].join('\n');
+      }),
     ].join('\n');
 
-    await ctx.reply(msg, { parse_mode: 'Markdown' });
+    await ctx.reply(msg, { parse_mode: 'HTML' });
   });
 
+  // Action callback: Compare Candidates Bar Chart
   bot.action('action_compare', async (ctx) => {
     await ctx.answerCbQuery();
     const sessionId = getSessionId(ctx.chat!.id);
     const session = await SessionStore.getSession(sessionId);
     const candidates = Object.values(session.candidates);
     if (candidates.length < 2) {
-      return ctx.reply(`Upload another resume to compare candidates. Current candidates analyzed: ${candidates.length}.`);
+      return ctx.reply(
+        `⚠️ Need at least 2 candidates to compare.\nCurrently analyzed: <b>${candidates.length}</b>.\n\nPlease upload another resume file (PDF or DOCX)!`,
+        { parse_mode: 'HTML' }
+      );
     }
 
     const rankings = RankingService.rankCandidates(session.jdProfile!, candidates);
     const barChartBuffer = ChartRenderer.generateComparisonBarChartPNG(rankings, session.jdProfile!.jobTitle);
-    const lines = rankings.map((c) => `${c.rank === 1 ? '🥇' : c.rank === 2 ? '🥈' : '🥉'} *${c.candidateName}:* ${c.score}% — ${c.verdict}`);
+    const lines = rankings.map((c, i) => {
+      const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `#${i + 1}`;
+      return `${medal} <b>${escapeHtml(c.candidateName)}:</b> <b>${c.score}%</b> — <i>${escapeHtml(c.verdict)}</i>`;
+    });
 
     await ctx.replyWithPhoto(
       { source: barChartBuffer },
       {
-        caption: `🏆 *Candidate Ranking*\n\n${lines.join('\n')}\n\n💡 *Why #1 Ranks First:* ${rankings[0].summaryReason}`,
-        parse_mode: 'Markdown',
+        caption: `🏆 <b>Candidate Leaderboard: ${escapeHtml(session.jdProfile!.jobTitle)}</b>`,
+        parse_mode: 'HTML',
       }
     );
-  });
 
-  async function sendReviewMessage(ctx: any, review: ReviewObject, session: SessionData) {
-    const missingGaps = review.whatToChangeBeforeApplying.slice(0, 2).map((g) => g.title).join(', ');
-    const topFix = review.whatToChangeBeforeApplying.length > 0
-      ? review.whatToChangeBeforeApplying[0].action
-      : 'Add measurable outcomes to your primary project and clarify testing tools.';
-
-    const caption = [
-      `📄 *Resume:* ${review.filename || review.candidateName}`,
-      `🎯 *JD:* ${session.jdProfile?.jobTitle || 'Role'}`,
-      '',
-      `*Score: ${review.roleFit.score}/100 — ${review.roleFit.verdict}*`,
-      '',
-      `🔴 *Missing:* ${missingGaps || 'None critical'}`,
-      `✏️ *Fix:* ${topFix}`,
+    const compareText = [
+      `🏆 <b>CANDIDATE RANKING SUMMARY</b>`,
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+      `💼 <b>Target Role:</b> ${escapeHtml(session.jdProfile!.jobTitle)}`,
+      ``,
+      ...lines,
+      ``,
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+      `💡 <b>Why #1 Ranks First:</b>`,
+      `<i>${escapeHtml(rankings[0].summaryReason)}</i>`,
     ].join('\n');
 
+    await ctx.reply(compareText, { parse_mode: 'HTML' });
+  });
+
+  // High-Impact, Beautifully Spaced Review Formatter
+  async function sendReviewMessage(ctx: any, review: ReviewObject, session: SessionData) {
+    const score = review.roleFit.score;
+    const jdTitle = session.jdProfile?.jobTitle || 'Target Role';
+    const strengths = review.recruitersEye.noticeFirst.slice(0, 3);
+    const gaps = review.whatToChangeBeforeApplying.slice(0, 3);
+    const topRewrite = review.suggestedWording[0];
+    const topSkill = review.learningPlan[0];
+
+    // 1. Send High-Resolution Visual Score Gauge Photo
     try {
-      const chartBuffer = ChartRenderer.generateScoreGaugePNG(review, session.jdProfile?.jobTitle || 'Role');
+      const chartBuffer = ChartRenderer.generateScoreGaugePNG(review, jdTitle);
       await ctx.replyWithPhoto(
         { source: chartBuffer },
         {
-          caption,
-          parse_mode: 'Markdown',
-          ...Markup.inlineKeyboard([
-            [
-              Markup.button.callback('📝 Suggested Rewrite', 'action_rewrites'),
-              Markup.button.callback('🎓 Next to Learn', 'action_learning'),
-            ],
-            [
-              Markup.button.callback('🏆 Compare Candidates', 'action_compare'),
-            ],
-          ]),
+          caption: `📊 <b>RoleFit ATS Score Gauge:</b> <code>${escapeHtml(review.candidateName)}</code>\n🎯 Score: <b>${score}% · ${escapeHtml(review.roleFit.verdict)}</b>`,
+          parse_mode: 'HTML',
         }
       );
-    } catch {
-      // Text fallback if photo attachment fails
-      await ctx.reply(caption, {
-        parse_mode: 'Markdown',
-        ...Markup.inlineKeyboard([
-          [
-            Markup.button.callback('📝 Suggested Rewrite', 'action_rewrites'),
-            Markup.button.callback('🎓 Next to Learn', 'action_learning'),
-          ],
-        ]),
-      });
+    } catch (err: any) {
+      console.warn(`Chart photo send warning: ${err.message}`);
     }
+
+    // 2. Send the Full, Spacious, Highly-Detailed Formatted Report
+    const reportText = [
+      `📊 <b>ROLEFIT RECRUITER ATS REPORT</b>`,
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+      `👤 <b>Candidate:</b> <code>${escapeHtml(review.candidateName)}</code>`,
+      `💼 <b>Target Role:</b> <b>${escapeHtml(jdTitle)}</b>`,
+      `📈 <b>Match Score:</b> <b>${score}/100</b> [${getScoreBadge(score)} <b>${escapeHtml(review.roleFit.verdict)}</b>]`,
+      ``,
+      `💬 <b>Recruiter Verdict:</b>`,
+      `<i>"${escapeHtml(review.roleFit.summary)}"</i>`,
+      ``,
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+      `📊 <b>4-PARAMETER ATS BREAKDOWN</b>`,
+      ``,
+      `• <b>Skills Alignment:</b>`,
+      `  <code>[${renderProgressBar(review.subscores.skills)}] ${review.subscores.skills}%</code>`,
+      ``,
+      `• <b>Experience Depth:</b>`,
+      `  <code>[${renderProgressBar(review.subscores.experience)}] ${review.subscores.experience}%</code>`,
+      ``,
+      `• <b>Keyword Evidence:</b>`,
+      `  <code>[${renderProgressBar(review.subscores.keywords)}] ${review.subscores.keywords}%</code>`,
+      ``,
+      `• <b>ATS Parseability:</b>`,
+      `  <code>[${renderProgressBar(review.subscores.formatting)}] ${review.subscores.formatting}%</code>`,
+      ``,
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+      `🟢 <b>WHAT STANDS OUT (STRENGTHS)</b>`,
+      ...(strengths.length > 0
+        ? strengths.map((s) => `• ${escapeHtml(s)}`)
+        : ['• Core technical skill foundation demonstrated.']),
+      ``,
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+      `🔴 <b>WEAK POINTS & GAPS (MUST FIX)</b>`,
+      ...(gaps.length > 0
+        ? gaps.map((g) => `• <b>${escapeHtml(g.title)}:</b> ${escapeHtml(g.reason)}\n  👉 <i>Action: ${escapeHtml(g.action)}</i>`)
+        : ['• Missing verifiable production metrics and automated testing tools.']),
+      ...(review.hasCriticalGap && review.criticalGapMessage
+        ? [``, `⚠️ <b>Critical Gap Warning:</b>\n<i>${escapeHtml(review.criticalGapMessage)}</i>`]
+        : []),
+      ``,
+      ...(topRewrite
+        ? [
+            `━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+            `✏️ <b>RECOMMENDED BULLET REWRITE</b>`,
+            `<b>Before:</b>`,
+            `<i>"${escapeHtml(topRewrite.before)}"</i>`,
+            ``,
+            `<b>Suggested:</b>`,
+            `<i>"${escapeHtml(topRewrite.after)}"</i>`,
+            ``,
+            `💡 <b>Recruiter Tip:</b> <i>${escapeHtml(topRewrite.guidance)}</i>`,
+            ``,
+          ]
+        : []),
+      ...(topSkill
+        ? [
+            `━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+            `🎓 <b>PRIORITY SKILL TO LEARN NEXT</b>`,
+            `📚 <b>${escapeHtml(topSkill.topic)}</b> [${escapeHtml(topSkill.priority)} Priority]`,
+            `<i>Reason: ${escapeHtml(topSkill.reason)}</i>`,
+          ]
+        : []),
+    ].join('\n');
+
+    await ctx.reply(reportText, {
+      parse_mode: 'HTML',
+      ...Markup.inlineKeyboard([
+        [
+          Markup.button.callback('📝 More Bullet Rewrites', 'action_rewrites'),
+          Markup.button.callback('🎓 Full Learning Roadmap', 'action_learning'),
+        ],
+        [
+          Markup.button.callback('🏆 Compare All Candidates', 'action_compare'),
+        ],
+      ]),
+    });
   }
 
   // Launch bot
