@@ -327,95 +327,98 @@ export function setupTelegramBot(
 
   // Action callback: Detailed Bullet Rewrites
   bot.action('action_rewrites', async (ctx) => {
-    await ctx.answerCbQuery();
-    const sessionId = getSessionId(ctx.chat!.id);
-    const session = await SessionStore.getSession(sessionId);
-    const candidates = Object.values(session.candidates);
-    if (candidates.length === 0) return ctx.reply('No candidate analyzed yet.');
+    try {
+      await ctx.answerCbQuery().catch(() => {});
+      const sessionId = getSessionId(ctx.chat!.id);
+      const session = await SessionStore.getSession(sessionId);
+      const candidates = Object.values(session.candidates);
+      if (candidates.length === 0) return ctx.reply('No candidate analyzed yet.');
 
-    const c = candidates[candidates.length - 1];
-    const rewrites = c.suggestedWording;
-    if (rewrites.length === 0) return ctx.reply('No bullet rewrites available.');
+      const c = candidates[candidates.length - 1];
+      const rewrites = c.suggestedWording;
+      if (rewrites.length === 0) return ctx.reply('No bullet rewrites available.');
 
-    const msg = [
-      `📝 <b>Suggested Bullet Rewrites:</b>`,
-      ``,
-      ...rewrites.slice(0, 2).map((r, i) => [
-        `<b>${i + 1}. Before:</b> <i>"${escapeHtml(r.before)}"</i>`,
-        `👉 <b>Rewrite:</b> <i>"${escapeHtml(r.after)}"</i>`,
-        `💡 <i>${escapeHtml(r.guidance)}</i>`,
+      const msg = [
+        `📝 <b>Suggested Bullet Rewrites:</b>`,
         ``,
-      ].join('\n')),
-    ].join('\n');
+        ...rewrites.slice(0, 2).map((r, i) => [
+          `<b>${i + 1}. Before:</b> <i>"${escapeHtml(r.before)}"</i>`,
+          `👉 <b>Rewrite:</b> <i>"${escapeHtml(r.after)}"</i>`,
+          `💡 <i>${escapeHtml(r.guidance)}</i>`,
+          ``,
+        ].join('\n')),
+      ].join('\n');
 
-    await ctx.reply(msg, { parse_mode: 'HTML' });
+      await ctx.reply(msg, { parse_mode: 'HTML' });
+    } catch (err: any) {
+      console.warn(`action_rewrites error: ${err.message}`);
+    }
   });
 
   // Action callback: Complete Learning Roadmap
   bot.action('action_learning', async (ctx) => {
-    await ctx.answerCbQuery();
-    const sessionId = getSessionId(ctx.chat!.id);
-    const session = await SessionStore.getSession(sessionId);
-    const candidates = Object.values(session.candidates);
-    if (candidates.length === 0) return ctx.reply('No candidate analyzed yet.');
+    try {
+      await ctx.answerCbQuery().catch(() => {});
+      const sessionId = getSessionId(ctx.chat!.id);
+      const session = await SessionStore.getSession(sessionId);
+      const candidates = Object.values(session.candidates);
+      if (candidates.length === 0) return ctx.reply('No candidate analyzed yet.');
 
-    const c = candidates[candidates.length - 1];
-    const learning = c.learningPlan;
-    if (learning.length === 0) return ctx.reply('No urgent learning gaps found for this role!');
+      const c = candidates[candidates.length - 1];
+      const learning = c.learningPlan;
+      if (learning.length === 0) return ctx.reply('No urgent learning gaps found for this role!');
 
-    const msg = [
-      `📚 <b>Top Skills to Learn Next:</b>`,
-      ``,
-      ...learning.slice(0, 3).map((l, i) => {
-        const badge = l.priority === 'CRITICAL' ? '🔴 [Critical]' : l.priority === 'HIGH' ? '🟠 [High]' : '🟡 [Medium]';
-        return `• <b>${escapeHtml(l.topic)}</b> ${badge}\n  <i>${escapeHtml(l.reason)}</i>\n`;
-      }),
-    ].join('\n');
+      const msg = [
+        `📚 <b>Top Skills to Learn Next:</b>`,
+        ``,
+        ...learning.slice(0, 3).map((l, i) => {
+          const badge = l.priority === 'CRITICAL' ? '🔴 [Critical]' : l.priority === 'HIGH' ? '🟠 [High]' : '🟡 [Medium]';
+          return `• <b>${escapeHtml(l.topic)}</b> ${badge}\n  <i>${escapeHtml(l.reason)}</i>\n`;
+        }),
+      ].join('\n');
 
-    await ctx.reply(msg, { parse_mode: 'HTML' });
+      await ctx.reply(msg, { parse_mode: 'HTML' });
+    } catch (err: any) {
+      console.warn(`action_learning error: ${err.message}`);
+    }
   });
 
   // Action callback: Compare Candidates Bar Chart
   bot.action('action_compare', async (ctx) => {
-    await ctx.answerCbQuery();
-    const sessionId = getSessionId(ctx.chat!.id);
-    const session = await SessionStore.getSession(sessionId);
-    const candidates = Object.values(session.candidates);
-    if (candidates.length < 2) {
-      return ctx.reply(
-        `⚠️ Need at least 2 candidates to compare.\nCurrently analyzed: <b>${candidates.length}</b>.\n\nPlease upload another resume file (PDF or DOCX)!`,
-        { parse_mode: 'HTML' }
-      );
-    }
-
-    const rankings = RankingService.rankCandidates(session.jdProfile!, candidates);
-    const barChartBuffer = ChartRenderer.generateComparisonBarChartPNG(rankings, session.jdProfile!.jobTitle);
-    const lines = rankings.map((c, i) => {
-      const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `#${i + 1}`;
-      return `${medal} <b>${escapeHtml(c.candidateName)}:</b> <b>${c.score}%</b> — <i>${escapeHtml(c.verdict)}</i>`;
-    });
-
-    await ctx.replyWithPhoto(
-      { source: barChartBuffer },
-      {
-        caption: `🏆 <b>Candidate Leaderboard: ${escapeHtml(session.jdProfile!.jobTitle)}</b>`,
-        parse_mode: 'HTML',
+    try {
+      await ctx.answerCbQuery().catch(() => {});
+      const sessionId = getSessionId(ctx.chat!.id);
+      const session = await SessionStore.getSession(sessionId);
+      const candidates = Object.values(session.candidates);
+      if (candidates.length < 2) {
+        return ctx.reply(
+          `⚠️ Need at least 2 candidates to compare.\nCurrently analyzed: <b>${candidates.length}</b>.\n\nPlease upload another resume file (PDF or DOCX)!`,
+          { parse_mode: 'HTML' }
+        );
       }
-    );
 
-    const compareText = [
-      `🏆 <b>CANDIDATE RANKING SUMMARY</b>`,
-      `━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
-      `💼 <b>Target Role:</b> ${escapeHtml(session.jdProfile!.jobTitle)}`,
-      ``,
-      ...lines,
-      ``,
-      `━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
-      `💡 <b>Why #1 Ranks First:</b>`,
-      `<i>${escapeHtml(rankings[0].summaryReason)}</i>`,
-    ].join('\n');
+      const rankings = RankingService.rankCandidates(session.jdProfile!, candidates);
+      const barChartBuffer = ChartRenderer.generateComparisonBarChartPNG(rankings, session.jdProfile!.jobTitle);
+      const lines = rankings.map((c, i) => {
+        const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `#${i + 1}`;
+        return `${medal} <b>${escapeHtml(c.candidateName)}:</b> <b>${c.score}%</b> — <i>${escapeHtml(c.verdict)}</i>`;
+      });
 
-    await ctx.reply(compareText, { parse_mode: 'HTML' });
+      const compareText = [
+        `🏆 <b>CANDIDATE RANKING SUMMARY</b>`,
+        `━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+        `💼 <b>Target Role:</b> ${escapeHtml(session.jdProfile!.jobTitle)}`,
+        ``,
+        ...lines,
+        ``,
+        `💡 <b>Why #1 Ranks First:</b>`,
+        `<i>${escapeHtml(rankings[0].summaryReason)}</i>`,
+      ].join('\n');
+
+      await ctx.reply(compareText, { parse_mode: 'HTML' });
+    } catch (err: any) {
+      console.warn(`action_compare error: ${err.message}`);
+    }
   });
 
   // Clean, Simple & Precise Review Formatter (Single Photo Message with Bar Graph)
