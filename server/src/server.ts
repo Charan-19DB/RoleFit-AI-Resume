@@ -291,6 +291,83 @@ app.post('/api/chat', async (req: Request, res: Response, next: NextFunction): P
   }
 });
 
+// 6. WhatsApp Cloud API Webhook Verification (Meta for Developers)
+app.get('/webhook/whatsapp', (req: Request, res: Response) => {
+  const mode = req.query['hub.mode'];
+  const token = req.query['hub.verify_token'];
+  const challenge = req.query['hub.challenge'];
+  const verifyToken = process.env.WHATSAPP_VERIFY_TOKEN || 'rolefit_whatsapp_token';
+
+  if (mode === 'subscribe' && token === verifyToken) {
+    console.log('✅ WhatsApp Webhook verified successfully.');
+    res.status(200).send(challenge);
+  } else {
+    res.status(403).send('Verification failed');
+  }
+});
+
+// 7. WhatsApp Cloud API Message Receiver
+app.post('/webhook/whatsapp', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const entry = req.body.entry?.[0];
+    const changes = entry?.changes?.[0];
+    const value = changes?.value;
+    const message = value?.messages?.[0];
+
+    if (message) {
+      const from = message.from; // User's WhatsApp phone number
+      const sessionId = `wa-${from}`;
+      const text = message.text?.body?.trim() || '';
+
+      console.log(`📱 Incoming WhatsApp message from ${from}: "${text}"`);
+      // Acknowledge Meta immediately
+      res.status(200).json({ status: 'received' });
+
+      // Processing in background
+      const session = await SessionStore.getSession(sessionId);
+      if (!session.jdProfile && text.length >= 60) {
+        const profile = await geminiService.analyzeJobDescription(text);
+        await SessionStore.setJDProfile(sessionId, profile);
+      }
+    } else {
+      res.status(200).json({ status: 'ignored' });
+    }
+  } catch (err: any) {
+    console.warn(`⚠️ WhatsApp webhook error: ${err.message}`);
+    res.status(200).json({ status: 'error' });
+  }
+});
+
+// 8. Twilio WhatsApp Webhook Receiver
+app.post('/webhook/twilio-whatsapp', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const from = req.body.From || 'user';
+    const body = req.body.Body || '';
+    const sessionId = `tw-${from.replace(/[^0-9]/g, '')}`;
+
+    const session = await SessionStore.getSession(sessionId);
+    let reply = '';
+
+    if (!session.jdProfile && body.length >= 60) {
+      const profile = await geminiService.analyzeJobDescription(body);
+      await SessionStore.setJDProfile(sessionId, profile);
+      reply = `✅ Job Description received for *${profile.jobTitle}* (Primary: ${profile.primaryTechnologies.join(', ')}).\n\nNow send your candidate resume!`;
+    } else if (session.jdProfile) {
+      const review = await geminiService.analyzeCandidateResume(session.jdProfile, body, 'Candidate');
+      reply = `🎯 *Role Fit: ${review.roleFit.score}% · ${review.roleFit.verdict}*\n\n` +
+        `🟢 *Strengths:* ${review.recruitersEye.noticeFirst.slice(0, 2).join(' · ')}\n` +
+        `🔴 *Key Gap:* ${review.whatToChangeBeforeApplying[0]?.title || 'Missing unstated testing metrics'}\n` +
+        `🎓 *Next to Learn:* ${review.learningPlan[0]?.topic || 'None'}`;
+    } else {
+      reply = `👋 Welcome to RoleFit AI on WhatsApp! Send me a Job Description to begin reviewing resumes.`;
+    }
+
+    res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+  } catch (err: any) {
+    res.type('text/xml').send(`<Response><Message>Error processing request: ${err.message}</Message></Response>`);
+  }
+});
+
 // 6. Get Current Session State
 app.get('/api/session/:id', async (req: Request, res: Response): Promise<void> => {
   const paramId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;

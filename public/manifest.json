@@ -1,0 +1,16 @@
+{
+  "name": "RoleFit AI",
+  "short_name": "RoleFit",
+  "description": "AI Resume & Job Description Recruiter Reviewer",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0b141a",
+  "theme_color": "#202c33",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml"
+    }
+  ]
+}
