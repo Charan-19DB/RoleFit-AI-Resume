@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite --host",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "build:all": "npm run build && cd server && npm install && npm run build",
+    "start": "node server/dist/server.js"
   },
   "devDependencies": {
     "typescript": "~6.0.2",

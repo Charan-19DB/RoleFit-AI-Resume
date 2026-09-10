@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: rolefit-ai
+    env: node
+    plan: free
+    buildCommand: npm run build:all
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: MONGODB_URI
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: AI_TIMEOUT
+        value: 30000
+      - key: MAX_CONCURRENT_ANALYSES
+        value: 3

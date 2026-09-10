@@ -384,6 +384,24 @@ app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
   });
 });
 
+// Serve Frontend in Production (Render.com All-In-One Deployment)
+import path from 'path';
+import fs from 'fs';
+
+const distPath = fs.existsSync(path.resolve(process.cwd(), 'dist'))
+  ? path.resolve(process.cwd(), 'dist')
+  : path.resolve(process.cwd(), '../dist');
+
+if (fs.existsSync(distPath)) {
+  app.use(express.static(distPath));
+  app.get('*', (req: Request, res: Response, next: NextFunction) => {
+    if (req.path.startsWith('/api') || req.path.startsWith('/webhook') || req.path === '/health') {
+      return next();
+    }
+    res.sendFile(path.join(distPath, 'index.html'));
+  });
+}
+
 // Startup sequence
 async function start() {
   await initMongo(process.env.MONGODB_URI);
