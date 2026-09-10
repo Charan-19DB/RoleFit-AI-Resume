@@ -9,8 +9,18 @@ import { SessionStore, initMongo } from './services/sessionStore.js';
 import { setupTelegramBot } from './telegram/telegramBot.js';
 import { ReviewObject } from './types/index.js';
 import { ClassifierService } from './services/classifierService.js';
+import { setupDiscordBot } from './discord/discordBot.js';
 
-dotenv.config();
+import path from 'path';
+import fs from 'fs';
+
+const envPath = fs.existsSync(path.resolve(process.cwd(), '.env'))
+  ? path.resolve(process.cwd(), '.env')
+  : path.resolve(process.cwd(), 'server/.env');
+dotenv.config({ path: envPath });
+
+console.log(`📡 Environment loaded from: ${envPath}`);
+console.log(`🤖 Telegram bot token configured: ${!!process.env.TELEGRAM_BOT_TOKEN}`);
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -524,6 +534,81 @@ app.post('/webhook/twilio-whatsapp', async (req: Request, res: Response): Promis
   }
 });
 
+// 9. Slack Slash Command Receiver (/rolefit [text or file])
+app.post('/webhook/slack/command', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const text = (req.body.text || '').trim();
+    const userId = req.body.user_id || 'slack-user';
+    const sessionId = `slack-${userId}`;
+
+    if (!text) {
+      res.json({
+        response_type: 'ephemeral',
+        text: '👋 *RoleFit AI on Slack*\nUsage: `/rolefit [Job Description text or Candidate Resume text]`\nWorks in any order!',
+      });
+      return;
+    }
+
+    const session = await SessionStore.getSession(sessionId);
+    const classification = ClassifierService.classify(text, undefined, {
+      hasActiveJD: !!session.jdProfile,
+      hasPendingResumes: (session.pendingResumes?.length || 0) > 0,
+    });
+
+    if (classification === 'RESUME') {
+      if (session.jdProfile) {
+        const review = await geminiService.analyzeCandidateResume(session.jdProfile, text, 'Candidate');
+        await SessionStore.addCandidateReview(sessionId, review);
+        res.json({
+          response_type: 'in_channel',
+          text: `🎯 *RoleFit Review for ${session.jdProfile.jobTitle}*\n*Score:* ${review.roleFit.score}% — ${review.roleFit.verdict}\n• *Strengths:* ${review.recruitersEye.noticeFirst.slice(0, 2).join(' · ')}\n• *Key Gap:* ${review.whatToChangeBeforeApplying[0]?.title || 'None'}\n• *Next to Learn:* ${review.learningPlan[0]?.topic || 'None'}`,
+        });
+      } else {
+        if (!session.pendingResumes) session.pendingResumes = [];
+        session.pendingResumes.push({ text, filename: 'resume.txt', candidateName: 'Candidate' });
+        await SessionStore.saveSession(session);
+        res.json({
+          response_type: 'ephemeral',
+          text: '📄 *Resume received!* Now run `/rolefit [paste Job Description]` to evaluate.',
+        });
+      }
+    } else {
+      const profile = await geminiService.analyzeJobDescription(text);
+      await SessionStore.setJDProfile(sessionId, profile);
+
+      if (session.pendingResumes && session.pendingResumes.length > 0) {
+        const reviewTexts: string[] = [];
+        for (const pending of session.pendingResumes) {
+          const review = await geminiService.analyzeCandidateResume(profile, pending.text, pending.candidateName, pending.filename);
+          await SessionStore.addCandidateReview(sessionId, review);
+          reviewTexts.push(`🎯 *${pending.candidateName}:* ${review.roleFit.score}% — ${review.roleFit.verdict}`);
+        }
+        session.pendingResumes = [];
+        await SessionStore.saveSession(session);
+        res.json({
+          response_type: 'in_channel',
+          text: `✅ *Job Description Received:* ${profile.jobTitle}\nEvaluated against your previously submitted resume:\n` + reviewTexts.join('\n'),
+        });
+      } else {
+        res.json({
+          response_type: 'ephemeral',
+          text: `✅ *Job Description Received for ${profile.jobTitle}*\nNow run /rolefit [paste Resume] to review candidates!`,
+        });
+      }
+    }
+  } catch (err: any) {
+    res.json({ response_type: 'ephemeral', text: `⚠️ Error: ${err.message}` });
+  }
+});
+
+// 10. Slack URL verification challenge for Events API
+app.post('/webhook/slack/events', (req: Request, res: Response) => {
+  if (req.body.challenge) {
+    return res.json({ challenge: req.body.challenge });
+  }
+  res.json({ ok: true });
+});
+
 // 6. Get Current Session State
 app.get('/api/session/:id', async (req: Request, res: Response): Promise<void> => {
   const paramId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
@@ -541,8 +626,6 @@ app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
 });
 
 // Serve Frontend in Production (Render.com All-In-One Deployment)
-import path from 'path';
-import fs from 'fs';
 
 const distPath = fs.existsSync(path.resolve(process.cwd(), 'dist'))
   ? path.resolve(process.cwd(), 'dist')
@@ -562,6 +645,7 @@ if (fs.existsSync(distPath)) {
 async function start() {
   await initMongo(process.env.MONGODB_URI);
   setupTelegramBot(process.env.TELEGRAM_BOT_TOKEN, geminiService);
+  setupDiscordBot(process.env.DISCORD_BOT_TOKEN, geminiService);
 
   app.listen(PORT, () => {
     console.log(`🚀 RoleFit Server running at http://localhost:${PORT}`);
