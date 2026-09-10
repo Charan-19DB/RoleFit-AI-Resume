@@ -5,13 +5,18 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host",
-    "build": "tsc && vite build",
+    "build": "vite build",
+    "build:tsc": "tsc && vite build",
     "preview": "vite preview",
-    "build:all": "npm run build && cd server && npm install && npm run build",
+    "build:all": "npm install --include=dev && npm run build && cd server && npm install --include=dev && npm run build",
     "start": "node server/dist/server.js"
   },
+  "dependencies": {
+    "typescript": "^5.8.2",
+    "vite": "^8.2.2"
+  },
   "devDependencies": {
-    "typescript": "~6.0.2",
+    "typescript": "^5.8.2",
     "vite": "^8.2.2"
   }
 }
