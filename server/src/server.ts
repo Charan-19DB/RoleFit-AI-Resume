@@ -23,7 +23,7 @@ console.log(`📡 Environment loaded from: ${envPath}`);
 console.log(`🤖 Telegram bot token configured: ${!!process.env.TELEGRAM_BOT_TOKEN}`);
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT: number = parseInt(process.env.PORT || '3001', 10);
 
 // Middlewares
 app.use(cors({ origin: '*' }));
@@ -609,6 +609,68 @@ app.post('/webhook/slack/events', (req: Request, res: Response) => {
   res.json({ ok: true });
 });
 
+// 11. Facebook Messenger Webhook Verification (Meta for Developers)
+app.get('/webhook/facebook', (req: Request, res: Response) => {
+  const mode = req.query['hub.mode'];
+  const token = req.query['hub.verify_token'];
+  const challenge = req.query['hub.challenge'];
+  const verifyToken = process.env.FACEBOOK_VERIFY_TOKEN || 'rolefit_facebook_token';
+
+  if (mode === 'subscribe' && token === verifyToken) {
+    console.log('✅ Facebook Messenger Webhook verified successfully.');
+    res.status(200).send(challenge);
+  } else {
+    res.status(403).send('Verification failed');
+  }
+});
+
+// 12. Facebook Messenger Message Receiver
+app.post('/webhook/facebook', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const entry = req.body.entry?.[0];
+    const messaging = entry?.messaging?.[0];
+    const senderId = messaging?.sender?.id;
+    const text = (messaging?.message?.text || '').trim();
+
+    if (senderId && text) {
+      const sessionId = `fb-${senderId}`;
+      const session = await SessionStore.getSession(sessionId);
+
+      if (text.length >= 50) {
+        const classification = ClassifierService.classify(text, undefined, {
+          hasActiveJD: !!session.jdProfile,
+          hasPendingResumes: (session.pendingResumes?.length || 0) > 0,
+        });
+
+        if (classification === 'RESUME') {
+          if (session.jdProfile) {
+            const review = await geminiService.analyzeCandidateResume(session.jdProfile, text, 'Candidate');
+            await SessionStore.addCandidateReview(sessionId, review);
+          } else {
+            if (!session.pendingResumes) session.pendingResumes = [];
+            session.pendingResumes.push({ text, filename: 'resume.txt', candidateName: 'Candidate' });
+            await SessionStore.saveSession(session);
+          }
+        } else {
+          const profile = await geminiService.analyzeJobDescription(text);
+          await SessionStore.setJDProfile(sessionId, profile);
+          if (session.pendingResumes && session.pendingResumes.length > 0) {
+            for (const pending of session.pendingResumes) {
+              const review = await geminiService.analyzeCandidateResume(profile, pending.text, pending.candidateName, pending.filename);
+              await SessionStore.addCandidateReview(sessionId, review);
+            }
+            session.pendingResumes = [];
+            await SessionStore.saveSession(session);
+          }
+        }
+      }
+    }
+    res.status(200).json({ status: 'EVENT_RECEIVED' });
+  } catch (err: any) {
+    res.status(200).json({ status: 'error', error: err.message });
+  }
+});
+
 // 6. Get Current Session State
 app.get('/api/session/:id', async (req: Request, res: Response): Promise<void> => {
   const paramId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
@@ -647,8 +709,8 @@ async function start() {
   setupTelegramBot(process.env.TELEGRAM_BOT_TOKEN, geminiService);
   setupDiscordBot(process.env.DISCORD_BOT_TOKEN, geminiService);
 
-  app.listen(PORT, () => {
-    console.log(`🚀 RoleFit Server running at http://localhost:${PORT}`);
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`🚀 RoleFit Server running at http://0.0.0.0:${PORT} (accessible via localhost and LAN IP)`);
     console.log(`📡 Health check: http://localhost:${PORT}/health`);
   });
 }
