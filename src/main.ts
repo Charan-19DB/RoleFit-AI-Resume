@@ -57,7 +57,9 @@ interface StructuredJDProfile {
   requirements: { name: string; priority: string; weight: number }[];
 }
 
-const API_BASE = 'http://localhost:3001/api';
+const API_BASE = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+  ? 'http://localhost:3001/api'
+  : `http://${window.location.hostname}:3001/api`;
 let sessionId = localStorage.getItem('rolefit_mobile_sess') || `mob-${Date.now()}`;
 localStorage.setItem('rolefit_mobile_sess', sessionId);
 

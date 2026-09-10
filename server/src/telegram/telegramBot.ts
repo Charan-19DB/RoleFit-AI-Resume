@@ -4,6 +4,7 @@ import { DocumentParser } from '../parsers/documentParser.js';
 import { RankingService } from '../services/rankingService.js';
 import { ReviewObject, SessionData } from '../types/index.js';
 import { SessionStore } from '../services/sessionStore.js';
+import { ChartRenderer } from '../services/chartRenderer.js';
 
 export function setupTelegramBot(
   token: string | undefined,
@@ -250,50 +251,64 @@ export function setupTelegramBot(
     }
 
     const rankings = RankingService.rankCandidates(session.jdProfile!, candidates);
-    const summary = RankingService.formatComparativeSummary(rankings);
-    await ctx.reply(summary);
+    const barChartBuffer = ChartRenderer.generateComparisonBarChartPNG(rankings, session.jdProfile!.jobTitle);
+    const lines = rankings.map((c) => `${c.rank === 1 ? '🥇' : c.rank === 2 ? '🥈' : '🥉'} *${c.candidateName}:* ${c.score}% — ${c.verdict}`);
+
+    await ctx.replyWithPhoto(
+      { source: barChartBuffer },
+      {
+        caption: `🏆 *Candidate Ranking*\n\n${lines.join('\n')}\n\n💡 *Why #1 Ranks First:* ${rankings[0].summaryReason}`,
+        parse_mode: 'Markdown',
+      }
+    );
   });
 
   async function sendReviewMessage(ctx: any, review: ReviewObject, session: SessionData) {
-    const lines = [
-      `🧭 *RESUME REVIEW · ${review.candidateName}*`,
-      '',
-      `*Role Fit:* ${review.roleFit.verdict} — *${review.roleFit.score}%*`,
-      `${review.roleFit.summary}`,
-      '',
-      '────────────────────────────',
-      '👀 *RECRUITER’S EYE*',
-      `• *I’d notice first:* ${review.recruitersEye.noticeFirst.join(', ')}`,
-      `• *I’d question:* ${review.recruitersEye.question.join(', ')}`,
-      `• *I’d skip over:* ${review.recruitersEye.skipOver.join(', ')}`,
-      '',
-      '────────────────────────────',
-      '✏️ *WHAT I’D CHANGE BEFORE APPLYING*',
-      ...review.whatToChangeBeforeApplying.slice(0, 3).map((e, idx) => {
-        return `${idx + 1}. *${e.title}* [${e.priority} Priority]\n   • Why: ${e.reason}\n   • Action: ${e.action}\n   • _Honesty check: ${e.honestyNote}_`;
-      }),
-      '',
-      '────────────────────────────',
-      '📚 *TOP LEARNING PRIORITY*',
-      review.learningPlan.length > 0
-        ? `1. *${review.learningPlan[0].topic}* [${review.learningPlan[0].priority} Priority]\n   ${review.learningPlan[0].reason}`
-        : 'No critical technical gaps identified.',
-      '',
-      '💬 *What would you like to do next?*',
-    ];
+    const missingGaps = review.whatToChangeBeforeApplying.slice(0, 2).map((g) => g.title).join(', ');
+    const topFix = review.whatToChangeBeforeApplying.length > 0
+      ? review.whatToChangeBeforeApplying[0].action
+      : 'Add measurable outcomes to your primary project and clarify testing tools.';
 
-    await ctx.reply(lines.join('\n'), {
-      parse_mode: 'Markdown',
-      ...Markup.inlineKeyboard([
-        [
-          Markup.button.callback('📝 Review Rewrites', 'action_rewrites'),
-          Markup.button.callback('📚 Learning Plan', 'action_learning'),
-        ],
-        [
-          Markup.button.callback('🏆 Compare Candidates', 'action_compare'),
-        ],
-      ]),
-    });
+    const caption = [
+      `📄 *Resume:* ${review.filename || review.candidateName}`,
+      `🎯 *JD:* ${session.jdProfile?.jobTitle || 'Role'}`,
+      '',
+      `*Score: ${review.roleFit.score}/100 — ${review.roleFit.verdict}*`,
+      '',
+      `🔴 *Missing:* ${missingGaps || 'None critical'}`,
+      `✏️ *Fix:* ${topFix}`,
+    ].join('\n');
+
+    try {
+      const chartBuffer = ChartRenderer.generateScoreGaugePNG(review, session.jdProfile?.jobTitle || 'Role');
+      await ctx.replyWithPhoto(
+        { source: chartBuffer },
+        {
+          caption,
+          parse_mode: 'Markdown',
+          ...Markup.inlineKeyboard([
+            [
+              Markup.button.callback('📝 Suggested Rewrite', 'action_rewrites'),
+              Markup.button.callback('🎓 Next to Learn', 'action_learning'),
+            ],
+            [
+              Markup.button.callback('🏆 Compare Candidates', 'action_compare'),
+            ],
+          ]),
+        }
+      );
+    } catch {
+      // Text fallback if photo attachment fails
+      await ctx.reply(caption, {
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard([
+          [
+            Markup.button.callback('📝 Suggested Rewrite', 'action_rewrites'),
+            Markup.button.callback('🎓 Next to Learn', 'action_learning'),
+          ],
+        ]),
+      });
+    }
   }
 
   // Launch bot
