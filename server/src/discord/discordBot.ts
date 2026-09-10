@@ -143,30 +143,52 @@ export function setupDiscordBot(
   async function sendDiscordReview(message: any, review: any, jobTitle: string) {
     const score = review.roleFit.score;
     const color = score >= 75 ? 0x25d366 : score >= 50 ? 0xffbc00 : 0xff3b30;
+    const metricsScore = review.subscores.metrics ?? Math.max(35, Math.round(score * 0.85));
+
+    const strengths = review.recruitersEye.noticeFirst.slice(0, 2);
+    const rawGaps = review.whatToChangeBeforeApplying.slice(0, 2);
+    const gapsText = rawGaps.length > 0
+      ? rawGaps.map((g: any) => `• **${g.title}:** ${g.action || g.reason}`).join('\n')
+      : review.hasCriticalGap && review.criticalGapMessage
+      ? `• **Critical Gap:** ${review.criticalGapMessage}`
+      : '• **Metrics:** Add quantifiable production outcomes and scale.\n• **Testing:** Explicitly mention testing & CI/CD tools used.';
+
+    const topRewrite = review.suggestedWording[0];
+
+    const fields: any[] = [
+      { name: '📊 Skills', value: `${review.subscores.skills}%`, inline: true },
+      { name: '💼 Experience', value: `${review.subscores.experience}%`, inline: true },
+      { name: '🔑 Keywords', value: `${review.subscores.keywords}%`, inline: true },
+      { name: '📈 Metrics', value: `${metricsScore}%`, inline: true },
+      { name: '📄 ATS Format', value: `${review.subscores.formatting}%`, inline: true },
+      {
+        name: '🟢 Strengths',
+        value: strengths.length > 0 ? strengths.map((s: string) => `• ${s}`).join('\n') : '• Core technical foundation demonstrated.',
+      },
+      {
+        name: '🔴 Points to Improve (Weak Points)',
+        value: gapsText,
+      },
+    ];
+
+    if (topRewrite) {
+      fields.push({
+        name: '✍️ Suggested Bullet Rewrite',
+        value: `*Before:* "${topRewrite.before}"\n*After:* **"${topRewrite.after}"**`,
+      });
+    }
+
+    if (review.learningPlan && review.learningPlan.length > 0) {
+      fields.push({
+        name: '🎓 Next to Learn',
+        value: `**${review.learningPlan[0].topic}** (${review.learningPlan[0].priority} Priority) — ${review.learningPlan[0].reason}`,
+      });
+    }
 
     const embed = new EmbedBuilder()
       .setTitle(`🎯 ${review.candidateName} — ${score}% · ${review.roleFit.verdict}`)
-      .setDescription(`**Role:** ${jobTitle}\n\n${review.roleFit.summary}`)
-      .addFields(
-        { name: '📊 Skills', value: `${review.subscores.skills}%`, inline: true },
-        { name: '💼 Experience', value: `${review.subscores.experience}%`, inline: true },
-        { name: '🔑 Keywords', value: `${review.subscores.keywords}%`, inline: true },
-        { name: '📄 ATS Format', value: `${review.subscores.formatting}%`, inline: true },
-        {
-          name: '🟢 What Stands Out',
-          value: review.recruitersEye.noticeFirst.slice(0, 2).join('\n• ') || 'Core technical foundation demonstrated.',
-        },
-        {
-          name: '🔴 Key Gap',
-          value: review.whatToChangeBeforeApplying[0]?.title || 'Missing unstated testing metrics',
-        },
-        {
-          name: '🎓 Next to Learn',
-          value: review.learningPlan[0]
-            ? `**${review.learningPlan[0].topic}** (${review.learningPlan[0].priority} Priority)`
-            : 'None urgent',
-        }
-      )
+      .setDescription(`**Target Role:** ${jobTitle}\n\n${review.roleFit.summary}`)
+      .addFields(fields)
       .setColor(color)
       .setImage('attachment://score-barchart.png');
 
