@@ -338,15 +338,13 @@ export function setupTelegramBot(
     if (rewrites.length === 0) return ctx.reply('No bullet rewrites available.');
 
     const msg = [
-      `📝 <b>TRUTH-FIRST BULLET REWRITES FOR ${escapeHtml(c.candidateName.toUpperCase())}</b>`,
-      `━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+      `📝 <b>Suggested Bullet Rewrites:</b>`,
       ``,
-      ...rewrites.map((r, i) => [
-        `<b>${i + 1}. ${escapeHtml(r.section || 'Experience')} Section</b>`,
-        `🔴 <b>Before:</b> <i>"${escapeHtml(r.before)}"</i>`,
-        `🟢 <b>Suggested:</b> <i>"${escapeHtml(r.after)}"</i>`,
-        `💡 <b>Recruiter Guidance:</b> <i>${escapeHtml(r.guidance)}</i>`,
-        `───────────────────────────`,
+      ...rewrites.slice(0, 2).map((r, i) => [
+        `<b>${i + 1}. Before:</b> <i>"${escapeHtml(r.before)}"</i>`,
+        `👉 <b>Rewrite:</b> <i>"${escapeHtml(r.after)}"</i>`,
+        `💡 <i>${escapeHtml(r.guidance)}</i>`,
+        ``,
       ].join('\n')),
     ].join('\n');
 
@@ -366,19 +364,11 @@ export function setupTelegramBot(
     if (learning.length === 0) return ctx.reply('No urgent learning gaps found for this role!');
 
     const msg = [
-      `📚 <b>PRIORITY LEARNING ROADMAP</b>`,
-      `━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
-      `👤 <b>Candidate:</b> ${escapeHtml(c.candidateName)}`,
-      `🎯 <b>Target Role:</b> ${escapeHtml(session.jdProfile?.jobTitle || 'Role')}`,
+      `📚 <b>Top Skills to Learn Next:</b>`,
       ``,
-      ...learning.map((l, i) => {
-        const badge = l.priority === 'CRITICAL' ? '🔴 [CRITICAL]' : l.priority === 'HIGH' ? '🟠 [HIGH]' : '🟡 [MEDIUM]';
-        return [
-          `<b>${i + 1}. ${escapeHtml(l.topic)}</b> ${badge}`,
-          `🎯 <b>Required for:</b> ${escapeHtml(l.jdRequirement || 'Core requirement')}`,
-          `💡 <b>Why:</b> <i>${escapeHtml(l.reason)}</i>`,
-          `───────────────────────────`,
-        ].join('\n');
+      ...learning.slice(0, 3).map((l, i) => {
+        const badge = l.priority === 'CRITICAL' ? '🔴 [Critical]' : l.priority === 'HIGH' ? '🟠 [High]' : '🟡 [Medium]';
+        return `• <b>${escapeHtml(l.topic)}</b> ${badge}\n  <i>${escapeHtml(l.reason)}</i>\n`;
       }),
     ].join('\n');
 
@@ -428,106 +418,62 @@ export function setupTelegramBot(
     await ctx.reply(compareText, { parse_mode: 'HTML' });
   });
 
-  // High-Impact, Beautifully Spaced Review Formatter
+  // Clean, Simple & Precise Review Formatter (Single Photo Message with Bar Graph)
   async function sendReviewMessage(ctx: any, review: ReviewObject, session: SessionData) {
     const score = review.roleFit.score;
     const jdTitle = session.jdProfile?.jobTitle || 'Target Role';
-    const strengths = review.recruitersEye.noticeFirst.slice(0, 3);
-    const gaps = review.whatToChangeBeforeApplying.slice(0, 3);
+    const topStrength = review.recruitersEye.noticeFirst[0] || 'Core technical foundation demonstrated.';
+    const topGap = review.whatToChangeBeforeApplying[0]
+      ? `${review.whatToChangeBeforeApplying[0].title}: ${review.whatToChangeBeforeApplying[0].action}`
+      : review.hasCriticalGap && review.criticalGapMessage
+      ? review.criticalGapMessage
+      : 'Missing quantifiable production metrics & test coverage.';
     const topRewrite = review.suggestedWording[0];
-    const topSkill = review.learningPlan[0];
 
-    // 1. Send High-Resolution Visual Cartesian Bar Graph Photo
+    const cleanCaption = [
+      `🎯 <b>ATS Match: ${score}/100</b> · <b>${escapeHtml(review.roleFit.verdict)}</b>`,
+      `👤 <b>Candidate:</b> <code>${escapeHtml(review.candidateName)}</code>`,
+      `💼 <b>Target Role:</b> <b>${escapeHtml(jdTitle)}</b>`,
+      ``,
+      `🟢 <b>Top Strength:</b>`,
+      `• ${escapeHtml(topStrength)}`,
+      ``,
+      `🔴 <b>Key Gap to Fix:</b>`,
+      `• ${escapeHtml(topGap)}`,
+      ...(topRewrite
+        ? [
+            ``,
+            `✍️ <b>Suggested Rewrite:</b>`,
+            `<i>"${escapeHtml(topRewrite.after)}"</i>`,
+          ]
+        : []),
+    ].join('\n');
+
+    const inlineKeyboard = Markup.inlineKeyboard([
+      [
+        Markup.button.callback('📝 Rewrites', 'action_rewrites'),
+        Markup.button.callback('🎓 Learn Skill', 'action_learning'),
+        Markup.button.callback('🏆 Compare', 'action_compare'),
+      ],
+    ]);
+
     try {
       const chartBuffer = ChartRenderer.generateScoreBarChartPNG(review, jdTitle);
       await ctx.replyWithPhoto(
         { source: chartBuffer },
         {
-          caption: `📊 <b>RoleFit ATS Bar Graph:</b> <code>${escapeHtml(review.candidateName)}</code>\n🎯 Overall Fit: <b>${score}% · ${escapeHtml(review.roleFit.verdict)}</b>`,
+          caption: cleanCaption,
           parse_mode: 'HTML',
+          ...inlineKeyboard,
         }
       );
     } catch (err: any) {
       console.warn(`Chart photo send warning: ${err.message}`);
+      await ctx.reply(cleanCaption, {
+        parse_mode: 'HTML',
+        ...inlineKeyboard,
+      });
     }
-
-    // 2. Send the Full, Spacious, Highly-Detailed Formatted Report
-    const reportText = [
-      `📊 <b>ROLEFIT RECRUITER ATS REPORT</b>`,
-      `━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
-      `👤 <b>Candidate:</b> <code>${escapeHtml(review.candidateName)}</code>`,
-      `💼 <b>Target Role:</b> <b>${escapeHtml(jdTitle)}</b>`,
-      `📈 <b>Match Score:</b> <b>${score}/100</b> [${getScoreBadge(score)} <b>${escapeHtml(review.roleFit.verdict)}</b>]`,
-      ``,
-      `💬 <b>Recruiter Verdict:</b>`,
-      `<i>"${escapeHtml(review.roleFit.summary)}"</i>`,
-      ``,
-      `━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
-      `📊 <b>4-PARAMETER ATS BREAKDOWN</b>`,
-      ``,
-      `• <b>Skills Alignment:</b>`,
-      `  <code>[${renderProgressBar(review.subscores.skills)}] ${review.subscores.skills}%</code>`,
-      ``,
-      `• <b>Experience Depth:</b>`,
-      `  <code>[${renderProgressBar(review.subscores.experience)}] ${review.subscores.experience}%</code>`,
-      ``,
-      `• <b>Keyword Evidence:</b>`,
-      `  <code>[${renderProgressBar(review.subscores.keywords)}] ${review.subscores.keywords}%</code>`,
-      ``,
-      `• <b>ATS Parseability:</b>`,
-      `  <code>[${renderProgressBar(review.subscores.formatting)}] ${review.subscores.formatting}%</code>`,
-      ``,
-      `━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
-      `🟢 <b>WHAT STANDS OUT (STRENGTHS)</b>`,
-      ...(strengths.length > 0
-        ? strengths.map((s) => `• ${escapeHtml(s)}`)
-        : ['• Core technical skill foundation demonstrated.']),
-      ``,
-      `━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
-      `🔴 <b>WEAK POINTS & GAPS (MUST FIX)</b>`,
-      ...(gaps.length > 0
-        ? gaps.map((g) => `• <b>${escapeHtml(g.title)}:</b> ${escapeHtml(g.reason)}\n  👉 <i>Action: ${escapeHtml(g.action)}</i>`)
-        : ['• Missing verifiable production metrics and automated testing tools.']),
-      ...(review.hasCriticalGap && review.criticalGapMessage
-        ? [``, `⚠️ <b>Critical Gap Warning:</b>\n<i>${escapeHtml(review.criticalGapMessage)}</i>`]
-        : []),
-      ``,
-      ...(topRewrite
-        ? [
-            `━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
-            `✏️ <b>RECOMMENDED BULLET REWRITE</b>`,
-            `<b>Before:</b>`,
-            `<i>"${escapeHtml(topRewrite.before)}"</i>`,
-            ``,
-            `<b>Suggested:</b>`,
-            `<i>"${escapeHtml(topRewrite.after)}"</i>`,
-            ``,
-            `💡 <b>Recruiter Tip:</b> <i>${escapeHtml(topRewrite.guidance)}</i>`,
-            ``,
-          ]
-        : []),
-      ...(topSkill
-        ? [
-            `━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
-            `🎓 <b>PRIORITY SKILL TO LEARN NEXT</b>`,
-            `📚 <b>${escapeHtml(topSkill.topic)}</b> [${escapeHtml(topSkill.priority)} Priority]`,
-            `<i>Reason: ${escapeHtml(topSkill.reason)}</i>`,
-          ]
-        : []),
-    ].join('\n');
-
-    await ctx.reply(reportText, {
-      parse_mode: 'HTML',
-      ...Markup.inlineKeyboard([
-        [
-          Markup.button.callback('📝 More Bullet Rewrites', 'action_rewrites'),
-          Markup.button.callback('🎓 Full Learning Roadmap', 'action_learning'),
-        ],
-        [
-          Markup.button.callback('🏆 Compare All Candidates', 'action_compare'),
-        ],
-      ]),
-    });
   }
 
   // Launch bot
