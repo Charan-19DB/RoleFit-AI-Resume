@@ -112,6 +112,7 @@ app.innerHTML = `
       <!-- Quick Suggestion Strip -->
       <div class="suggestion-strip" id="suggestion-strip">
         <button class="strip-chip" data-fill="We are hiring a Java Backend Developer with Spring Boot, SQL, and REST APIs. Python is preferred.">📝 Java Backend JD</button>
+        <button class="strip-chip" data-fill="Alex Morgan | alex@email.com | github.com/alexm&#10;Education: B.Tech Computer Science, 2024&#10;Experience: Junior Java Engineer at TechCorp (1 yr). Built REST APIs with Spring Boot and PostgreSQL, improved query performance by 25%.&#10;Skills: Java, Spring Boot, SQL, Docker, Git.">📄 Sample Resume</button>
         <button class="strip-chip" data-fill="Why did I get this score?">❓ Why this score?</button>
         <button class="strip-chip" data-fill="Which bullet should I rewrite first?">✏️ Best rewrite</button>
         <button class="strip-chip" data-fill="What should I learn next?">🎓 What to learn</button>
@@ -224,8 +225,8 @@ function appendBotMessage(htmlContent: string) {
   scrollToBottom();
 }
 
-// 1. Process Job Description (Simple & Precise)
-async function handleJobDescription(text?: string, file?: File) {
+// Universal Smart Input Handler (Handles JD first, Resume first, or any random order!)
+async function handleUniversalInput(text?: string, file?: File) {
   const typing = showTypingIndicator();
   try {
     const formData = new FormData();
@@ -233,66 +234,58 @@ async function handleJobDescription(text?: string, file?: File) {
     if (text) formData.append('text', text);
     if (file) formData.append('file', file);
 
-    const res = await fetch(`${API_BASE}/jd`, { method: 'POST', body: formData });
+    const res = await fetch(`${API_BASE}/process-input`, { method: 'POST', body: formData });
     removeTypingIndicator(typing);
 
     if (res.ok) {
       const data = await res.json();
-      activeJD = data.profile;
-      document.querySelector('#header-title')!.textContent = activeJD?.jobTitle.slice(0, 24) || 'RoleFit AI';
-
-      const crit = activeJD?.requirements.filter((r) => r.priority === 'CRITICAL').length || 0;
-      const high = activeJD?.requirements.filter((r) => r.priority === 'HIGH').length || 0;
-      const low = activeJD?.requirements.filter((r) => r.priority === 'LOW').length || 0;
-
-      appendBotMessage(`
-        <p>✅ <strong>Role Analyzed:</strong> ${activeJD?.jobTitle}</p>
-        <p style="font-size: 12.5px; color: var(--wa-accent); margin-top: 3px;">
-          Primary Stack: <strong>${activeJD?.primaryTechnologies.join(', ')}</strong>
-        </p>
-        <div style="display: flex; gap: 6px; margin: 8px 0; font-size: 11px;">
-          <span style="background: rgba(248, 113, 113, 0.2); color: #f87171; padding: 2px 6px; border-radius: 4px;">🔴 ${crit} Critical</span>
-          <span style="background: rgba(251, 191, 36, 0.2); color: #fbbf24; padding: 2px 6px; border-radius: 4px;">🟠 ${high} High</span>
-          <span style="background: rgba(59, 130, 246, 0.2); color: #60a5fa; padding: 2px 6px; border-radius: 4px;">🟡 ${low} Preferred</span>
-        </div>
-        <p style="font-size: 12.5px; color: var(--wa-text-secondary);">
-          👉 Attach or paste a <strong>Resume</strong> to get the match score.
-        </p>
-      `);
+      if (data.type === 'RESUME_SAVED_PENDING_JD') {
+        appendBotMessage(`
+          <p>📄 <strong>Resume Received for ${data.candidateName}</strong></p>
+          <p style="font-size: 12.5px; color: var(--wa-accent); margin-top: 4px;">
+            Now send or paste the <strong>Job Description</strong> to evaluate this resume against!
+          </p>
+        `);
+      } else if (data.type === 'JD_SAVED_PENDING_RESUME') {
+        activeJD = data.profile;
+        document.querySelector('#header-title')!.textContent = activeJD?.jobTitle.slice(0, 24) || 'RoleFit AI';
+        appendBotMessage(`
+          <p>✅ <strong>Role Analyzed:</strong> ${activeJD?.jobTitle}</p>
+          <p style="font-size: 12.5px; color: var(--wa-accent); margin-top: 3px;">
+            Primary Stack: <strong>${activeJD?.primaryTechnologies.join(', ')}</strong>
+          </p>
+          <p style="font-size: 12.5px; color: var(--wa-text-secondary); margin-top: 6px;">
+            👉 Now attach or paste your <strong>Resume</strong> to get the match score!
+          </p>
+        `);
+      } else if (data.type === 'REVIEW_COMPLETE') {
+        const review: ReviewObject = data.review;
+        analyzedCandidates.push(review);
+        renderPreciseScoreBubble(review);
+      } else if (data.type === 'JD_AND_PENDING_REVIEWS') {
+        activeJD = data.profile;
+        document.querySelector('#header-title')!.textContent = activeJD?.jobTitle.slice(0, 24) || 'RoleFit AI';
+        appendBotMessage(`
+          <p>✅ <strong>Job Description Received:</strong> ${activeJD?.jobTitle}</p>
+          <p style="font-size: 12px; color: var(--wa-accent); margin-top: 2px;">Automatically matched your previously submitted resume!</p>
+        `);
+        for (const review of data.reviews) {
+          analyzedCandidates.push(review);
+          renderPreciseScoreBubble(review);
+        }
+      } else if (data.type === 'CHAT_REPLY') {
+        appendBotMessage(`<p>${data.reply}</p>`);
+      }
     } else {
-      appendBotMessage(`⚠️ Could not analyze JD. Please check your backend connection.`);
+      const errData = await res.json().catch(() => ({}));
+      appendBotMessage(`<p>⚠️ ${errData.error || 'Failed to process input. Please try again.'}</p>`);
     }
   } catch (err: any) {
     removeTypingIndicator(typing);
-    appendBotMessage(`⚠️ Error: ${err.message}`);
+    appendBotMessage(`<p>⚠️ Network error: ${err.message || 'Unable to connect to server'}</p>`);
   }
 }
 
-// 2. Process Resume (Simple & Precise Score Parameters)
-async function handleResume(file?: File, text?: string) {
-  const typing = showTypingIndicator();
-  try {
-    const formData = new FormData();
-    formData.append('sessionId', sessionId);
-    if (file) formData.append('file', file);
-    if (text) formData.append('resumeText', text);
-
-    const res = await fetch(`${API_BASE}/analyze-resume`, { method: 'POST', body: formData });
-    removeTypingIndicator(typing);
-
-    if (res.ok) {
-      const data = await res.json();
-      const review: ReviewObject = data.review;
-      analyzedCandidates.push(review);
-      renderPreciseScoreBubble(review);
-    } else {
-      appendBotMessage(`⚠️ Please submit a Job Description first.`);
-    }
-  } catch (err: any) {
-    removeTypingIndicator(typing);
-    appendBotMessage(`⚠️ Error analyzing resume: ${err.message}`);
-  }
-}
 
 // Render Simple & Precise Score Card
 function renderPreciseScoreBubble(review: ReviewObject) {
@@ -432,13 +425,8 @@ btnSend.addEventListener('click', () => {
   const val = input.value.trim();
   if (!val) return;
   input.value = '';
-
-  if (!activeJD) {
-    appendUserMessage(val);
-    handleJobDescription(val);
-  } else {
-    handleChat(val);
-  }
+  appendUserMessage(val);
+  handleUniversalInput(val);
 });
 
 input.addEventListener('keydown', (e) => {
@@ -457,12 +445,7 @@ fileInput.addEventListener('change', async () => {
 
   for (const file of files) {
     appendUserMessage('', file.name);
-
-    if (!activeJD) {
-      await handleJobDescription(undefined, file);
-    } else {
-      await handleResume(file);
-    }
+    await handleUniversalInput(undefined, file);
   }
 
   fileInput.value = '';

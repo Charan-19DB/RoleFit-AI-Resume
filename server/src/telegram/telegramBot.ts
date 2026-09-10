@@ -5,6 +5,7 @@ import { RankingService } from '../services/rankingService.js';
 import { ReviewObject, SessionData } from '../types/index.js';
 import { SessionStore } from '../services/sessionStore.js';
 import { ChartRenderer } from '../services/chartRenderer.js';
+import { ClassifierService } from '../services/classifierService.js';
 
 export function setupTelegramBot(
   token: string | undefined,
@@ -77,52 +78,68 @@ export function setupTelegramBot(
 
       const extractedText = await DocumentParser.extractText(buffer, mimeType, filename);
 
+      const classification = ClassifierService.classify(extractedText, filename);
       const session = await SessionStore.getSession(sessionId);
 
-      // If no JD profile exists yet, treat this document as the JD
-      if (!session.jdProfile) {
-        await ctx.telegram.editMessageText(chatId, statusMsg.message_id, undefined, '🧠 Understanding the role and core technologies...');
-        const profile = await geminiService.analyzeJobDescription(extractedText);
-        await SessionStore.setJDProfile(sessionId, profile);
+      if (classification === 'RESUME') {
+        const candidateName = filename.replace(/\.(pdf|docx|txt)$/i, '').replace(/[-_]/g, ' ');
 
-        const criticalCount = profile.requirements.filter((r) => r.priority === 'CRITICAL').length;
-        const highCount = profile.requirements.filter((r) => r.priority === 'HIGH').length;
-        const lowCount = profile.requirements.filter((r) => r.priority === 'LOW').length;
+        if (session.jdProfile) {
+          await ctx.telegram.editMessageText(chatId, statusMsg.message_id, undefined, `🔍 Evaluating "${candidateName}" against "${session.jdProfile.jobTitle}"...`);
+          const review = await geminiService.analyzeCandidateResume(session.jdProfile, extractedText, candidateName, filename);
+          await SessionStore.addCandidateReview(sessionId, review);
+          await ctx.telegram.editMessageText(chatId, statusMsg.message_id, undefined, '✅ Analysis complete!');
+          await sendReviewMessage(ctx, review, session);
+        } else {
+          if (!session.pendingResumes) session.pendingResumes = [];
+          session.pendingResumes.push({ text: extractedText, filename, candidateName });
+          await SessionStore.saveSession(session);
+          await ctx.telegram.editMessageText(
+            chatId,
+            statusMsg.message_id,
+            undefined,
+            `📄 *Resume received for ${candidateName}!*\n\n👉 Now send or paste the *Job Description* to match against.`,
+            { parse_mode: 'Markdown' }
+          );
+        }
+        return;
+      }
 
+      // If document is a JD
+      await ctx.telegram.editMessageText(chatId, statusMsg.message_id, undefined, '🧠 Understanding role and core requirements...');
+      const profile = await geminiService.analyzeJobDescription(extractedText);
+      await SessionStore.setJDProfile(sessionId, profile);
+
+      if (session.pendingResumes && session.pendingResumes.length > 0) {
         await ctx.telegram.editMessageText(
           chatId,
           statusMsg.message_id,
           undefined,
-          `✅ *Job Description Received*\n\n` +
-          `📌 *Role:* ${profile.jobTitle}\n` +
-          `⚡ *Primary Technology:* ${profile.primaryTechnologies.join(', ') || 'Not specified'}\n\n` +
-          `🔴 *Critical requirements:* ${criticalCount}\n` +
-          `🟠 *Important requirements:* ${highCount}\n` +
-          `🟡 *Preferred requirements:* ${lowCount}\n\n` +
-          `👉 *Now upload one or more resumes (PDF or DOCX)* to analyze candidate fit.`,
+          `✅ *Job Description Received:* ${profile.jobTitle}\n\n🔍 Automatically evaluating your previously uploaded resume...`,
           { parse_mode: 'Markdown' }
         );
-        return;
+        for (const pending of session.pendingResumes) {
+          const review = await geminiService.analyzeCandidateResume(profile, pending.text, pending.candidateName, pending.filename);
+          await SessionStore.addCandidateReview(sessionId, review);
+          await sendReviewMessage(ctx, review, session);
+        }
+        session.pendingResumes = [];
+        await SessionStore.saveSession(session);
+      } else {
+        await ctx.telegram.editMessageText(
+          chatId,
+          statusMsg.message_id,
+          undefined,
+          `✅ *Job Description Received:* ${profile.jobTitle}\n\n👉 Now upload your *Candidate Resume* (PDF or DOCX).`,
+          { parse_mode: 'Markdown' }
+        );
       }
-
-      // If JD profile already exists, treat document as candidate resume
-      await ctx.telegram.editMessageText(chatId, statusMsg.message_id, undefined, `🔍 Analyzing candidate evidence against "${session.jdProfile.jobTitle}"...`);
-
-      const candidateName = filename.replace(/\.(pdf|docx|txt)$/i, '').replace(/[-_]/g, ' ');
-      const review = await geminiService.analyzeCandidateResume(session.jdProfile, extractedText, candidateName, filename);
-
-      await SessionStore.addCandidateReview(sessionId, review);
-
-      await ctx.telegram.editMessageText(chatId, statusMsg.message_id, undefined, '✅ Analysis complete!');
-
-      // Send formatted human review
-      await sendReviewMessage(ctx, review, session);
     } catch (err: any) {
       await ctx.telegram.editMessageText(chatId, statusMsg.message_id, undefined, `⚠️ Error processing document: ${err.message}`);
     }
   });
 
-  // Handle plain text messages (JD input or conversational follow-up)
+  // Handle plain text messages (JD input, Resume paste, or conversational follow-up)
   bot.on('text', async (ctx) => {
     const text = ctx.message.text.trim();
     const chatId = ctx.chat.id;
@@ -130,44 +147,66 @@ export function setupTelegramBot(
 
     if (text === '🔄 Start New Review') {
       chatSessions.set(chatId, `tg-${chatId}-${Date.now()}`);
-      return ctx.reply('🔄 Fresh review started. Please send the Job Description text or upload a file.');
+      return ctx.reply('🔄 Fresh review started. Please send either a Job Description or a Resume (text or file).');
     }
     if (text === '📝 Paste JD Text' || text === '📄 Upload JD File') {
-      return ctx.reply('Please paste the Job Description text directly into chat, or send a PDF/DOCX file.');
+      return ctx.reply('Please paste the text directly into chat, or send a PDF/DOCX file.');
     }
 
     const session = await SessionStore.getSession(sessionId);
 
-    // If no JD yet, treat incoming text (> 80 characters) as JD
-    if (!session.jdProfile && text.length >= 80) {
-      const statusMsg = await ctx.reply('🧠 Reading and analyzing Job Description...');
-      try {
+    // If text is substantive (> 60 chars), classify it dynamically
+    if (text.length >= 60) {
+      const classification = ClassifierService.classify(text);
+
+      if (classification === 'RESUME') {
+        if (session.jdProfile) {
+          const statusMsg = await ctx.reply('🔍 Evaluating resume against active Job Description...');
+          const review = await geminiService.analyzeCandidateResume(session.jdProfile, text, 'Candidate');
+          await SessionStore.addCandidateReview(sessionId, review);
+          await ctx.telegram.editMessageText(chatId, statusMsg.message_id, undefined, '✅ Analysis complete!');
+          await sendReviewMessage(ctx, review, session);
+          return;
+        } else {
+          if (!session.pendingResumes) session.pendingResumes = [];
+          session.pendingResumes.push({ text, filename: 'resume.txt', candidateName: 'Candidate' });
+          await SessionStore.saveSession(session);
+          return ctx.reply('📄 *Resume received!*\n\n👉 Now please paste or upload the *Job Description* to match against.', { parse_mode: 'Markdown' });
+        }
+      } else {
+        // Text is a JD
+        const statusMsg = await ctx.reply('🧠 Reading and analyzing Job Description...');
         const profile = await geminiService.analyzeJobDescription(text);
         await SessionStore.setJDProfile(sessionId, profile);
 
-        const criticalCount = profile.requirements.filter((r) => r.priority === 'CRITICAL').length;
-        const highCount = profile.requirements.filter((r) => r.priority === 'HIGH').length;
-        const lowCount = profile.requirements.filter((r) => r.priority === 'LOW').length;
-
-        await ctx.telegram.editMessageText(
-          chatId,
-          statusMsg.message_id,
-          undefined,
-          `✅ *Job Description Received*\n\n` +
-          `📌 *Role:* ${profile.jobTitle}\n` +
-          `⚡ *Primary Technology:* ${profile.primaryTechnologies.join(', ') || 'Not specified'}\n\n` +
-          `🔴 *Critical requirements:* ${criticalCount}\n` +
-          `🟠 *Important requirements:* ${highCount}\n` +
-          `🟡 *Preferred requirements:* ${lowCount}\n\n` +
-          `👉 *Now upload one or more resumes (PDF or DOCX)* to analyze candidate fit.`,
-          { parse_mode: 'Markdown' }
-        );
-      } catch (err: any) {
-        await ctx.telegram.editMessageText(chatId, statusMsg.message_id, undefined, `⚠️ Error analyzing JD: ${err.message}`);
+        if (session.pendingResumes && session.pendingResumes.length > 0) {
+          await ctx.telegram.editMessageText(
+            chatId,
+            statusMsg.message_id,
+            undefined,
+            `✅ *Job Description Received:* ${profile.jobTitle}\n\n🔍 Automatically evaluating your previously uploaded resume...`,
+            { parse_mode: 'Markdown' }
+          );
+          for (const pending of session.pendingResumes) {
+            const review = await geminiService.analyzeCandidateResume(profile, pending.text, pending.candidateName, pending.filename);
+            await SessionStore.addCandidateReview(sessionId, review);
+            await sendReviewMessage(ctx, review, session);
+          }
+          session.pendingResumes = [];
+          await SessionStore.saveSession(session);
+          return;
+        } else {
+          await ctx.telegram.editMessageText(
+            chatId,
+            statusMsg.message_id,
+            undefined,
+            `✅ *Job Description Received:* ${profile.jobTitle}\n\n👉 Now upload or paste your *Candidate Resume*.`,
+            { parse_mode: 'Markdown' }
+          );
+          return;
+        }
       }
-      return;
     }
-
     // If candidate review already exists, treat as conversational follow-up
     const candidateList = Object.values(session.candidates);
     if (session.jdProfile && candidateList.length > 0) {

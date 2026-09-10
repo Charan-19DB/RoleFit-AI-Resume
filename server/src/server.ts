@@ -8,6 +8,7 @@ import { RankingService } from './services/rankingService.js';
 import { SessionStore, initMongo } from './services/sessionStore.js';
 import { setupTelegramBot } from './telegram/telegramBot.js';
 import { ReviewObject } from './types/index.js';
+import { ClassifierService } from './services/classifierService.js';
 
 dotenv.config();
 
@@ -47,6 +48,116 @@ app.get('/health', (_req: Request, res: Response) => {
     timestamp: new Date().toISOString(),
     uptimeSeconds: Math.floor(process.uptime()),
   });
+});
+
+// Smart Universal Input Handler: Handles JD first, Resume first, or any random order!
+app.post('/api/process-input', upload.single('file'), async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const sessionId = (req.body.sessionId as string) || `sess-${Date.now()}`;
+    let text = (req.body.text as string) || '';
+    const filename = req.file?.originalname;
+
+    if (req.file) {
+      text = await DocumentParser.extractText(req.file.buffer, req.file.mimetype, req.file.originalname);
+    }
+
+    if (!text || text.trim().length < 20) {
+      res.status(400).json({ success: false, error: 'Document or text is empty or too short.' });
+      return;
+    }
+
+    const session = await SessionStore.getSession(sessionId);
+    const candidateList = Object.values(session.candidates);
+
+    // If text message with no file, and candidates exist, check if it's a follow-up question
+    if (!req.file && candidateList.length > 0 && ClassifierService.isChatMessage(text)) {
+      const targetCandidate = candidateList[candidateList.length - 1];
+      await SessionStore.addMessage(sessionId, 'user', text);
+      const reply = await geminiService.answerFollowUp(
+        session.jdProfile!,
+        targetCandidate,
+        text,
+        session.messages.map((m) => ({ role: m.role, content: m.content }))
+      );
+      await SessionStore.addMessage(sessionId, 'assistant', reply);
+      res.json({
+        success: true,
+        type: 'CHAT_REPLY',
+        reply,
+        candidateName: targetCandidate.candidateName,
+      });
+      return;
+    }
+
+    const classification = ClassifierService.classify(text, filename, {
+      hasActiveJD: !!session.jdProfile,
+      hasPendingResumes: (session.pendingResumes?.length || 0) > 0,
+    });
+
+    if (classification === 'RESUME') {
+      const candidateName = (filename || 'Candidate').replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' ');
+
+      if (session.jdProfile) {
+        // JD already exists! Evaluate immediately
+        const review = await geminiService.analyzeCandidateResume(session.jdProfile, text, candidateName, filename);
+        await SessionStore.addCandidateReview(sessionId, review);
+        res.json({
+          success: true,
+          type: 'REVIEW_COMPLETE',
+          classification: 'RESUME',
+          review,
+          message: `Analyzed ${candidateName} against ${session.jdProfile.jobTitle}`,
+        });
+      } else {
+        // No JD yet! Save resume into pendingResumes
+        if (!session.pendingResumes) session.pendingResumes = [];
+        session.pendingResumes.push({ text, filename: filename || 'resume.txt', candidateName });
+        await SessionStore.saveSession(session);
+        res.json({
+          success: true,
+          type: 'RESUME_SAVED_PENDING_JD',
+          classification: 'RESUME',
+          candidateName,
+          message: `📄 Resume received for ${candidateName}. Now please send or paste the Job Description to match against!`,
+        });
+      }
+    } else {
+      // Classification is 'JD'
+      const profile = await geminiService.analyzeJobDescription(text);
+      await SessionStore.setJDProfile(sessionId, profile);
+
+      // Check if there are pending resumes!
+      if (session.pendingResumes && session.pendingResumes.length > 0) {
+        const reviews = [];
+        for (const pending of session.pendingResumes) {
+          const review = await geminiService.analyzeCandidateResume(profile, pending.text, pending.candidateName, pending.filename);
+          await SessionStore.addCandidateReview(sessionId, review);
+          reviews.push(review);
+        }
+        session.pendingResumes = [];
+        await SessionStore.saveSession(session);
+
+        res.json({
+          success: true,
+          type: 'JD_AND_PENDING_REVIEWS',
+          classification: 'JD',
+          profile,
+          reviews,
+          message: `✅ Job Description received for ${profile.jobTitle}. Evaluated your previously submitted resume!`,
+        });
+      } else {
+        res.json({
+          success: true,
+          type: 'JD_SAVED_PENDING_RESUME',
+          classification: 'JD',
+          profile,
+          message: `✅ Job Description received for ${profile.jobTitle}. Now send your candidate resume!`,
+        });
+      }
+    }
+  } catch (err: any) {
+    next(err);
+  }
 });
 
 // 1. Process Job Description (Text or File)
@@ -342,24 +453,69 @@ app.post('/webhook/whatsapp', async (req: Request, res: Response): Promise<void>
 app.post('/webhook/twilio-whatsapp', async (req: Request, res: Response): Promise<void> => {
   try {
     const from = req.body.From || 'user';
-    const body = req.body.Body || '';
+    const body = (req.body.Body || '').trim();
     const sessionId = `tw-${from.replace(/[^0-9]/g, '')}`;
 
     const session = await SessionStore.getSession(sessionId);
     let reply = '';
 
-    if (!session.jdProfile && body.length >= 60) {
-      const profile = await geminiService.analyzeJobDescription(body);
-      await SessionStore.setJDProfile(sessionId, profile);
-      reply = `✅ Job Description received for *${profile.jobTitle}* (Primary: ${profile.primaryTechnologies.join(', ')}).\n\nNow send your candidate resume!`;
-    } else if (session.jdProfile) {
-      const review = await geminiService.analyzeCandidateResume(session.jdProfile, body, 'Candidate');
-      reply = `🎯 *Role Fit: ${review.roleFit.score}% · ${review.roleFit.verdict}*\n\n` +
-        `🟢 *Strengths:* ${review.recruitersEye.noticeFirst.slice(0, 2).join(' · ')}\n` +
-        `🔴 *Key Gap:* ${review.whatToChangeBeforeApplying[0]?.title || 'Missing unstated testing metrics'}\n` +
-        `🎓 *Next to Learn:* ${review.learningPlan[0]?.topic || 'None'}`;
+    if (body.length >= 60) {
+      const classification = ClassifierService.classify(body, undefined, {
+        hasActiveJD: !!session.jdProfile,
+        hasPendingResumes: (session.pendingResumes?.length || 0) > 0,
+      });
+
+      if (classification === 'RESUME') {
+        if (session.jdProfile) {
+          const review = await geminiService.analyzeCandidateResume(session.jdProfile, body, 'Candidate');
+          await SessionStore.addCandidateReview(sessionId, review);
+          reply = `🎯 *Role Fit: ${review.roleFit.score}% · ${review.roleFit.verdict}*\n\n` +
+            `🟢 *Strengths:* ${review.recruitersEye.noticeFirst.slice(0, 2).join(' · ')}\n` +
+            `🔴 *Key Gap:* ${review.whatToChangeBeforeApplying[0]?.title || 'Missing unstated testing metrics'}\n` +
+            `🎓 *Next to Learn:* ${review.learningPlan[0]?.topic || 'None'}`;
+        } else {
+          if (!session.pendingResumes) session.pendingResumes = [];
+          session.pendingResumes.push({ text: body, filename: 'resume.txt', candidateName: 'Candidate' });
+          await SessionStore.saveSession(session);
+          reply = `📄 *Resume received!*\n\n👉 Now please send the *Job Description* (paste text or send document) to match against.`;
+        }
+      } else {
+        // Classification is JD
+        const profile = await geminiService.analyzeJobDescription(body);
+        await SessionStore.setJDProfile(sessionId, profile);
+
+        if (session.pendingResumes && session.pendingResumes.length > 0) {
+          const reviewReplies: string[] = [];
+          for (const pending of session.pendingResumes) {
+            const review = await geminiService.analyzeCandidateResume(profile, pending.text, pending.candidateName, pending.filename);
+            await SessionStore.addCandidateReview(sessionId, review);
+            reviewReplies.push(
+              `🎯 *${pending.candidateName}: ${review.roleFit.score}% · ${review.roleFit.verdict}*\n` +
+              `🟢 *Strengths:* ${review.recruitersEye.noticeFirst.slice(0, 2).join(' · ')}\n` +
+              `🔴 *Key Gap:* ${review.whatToChangeBeforeApplying[0]?.title || 'Missing unstated testing metrics'}\n` +
+              `🎓 *Next to Learn:* ${review.learningPlan[0]?.topic || 'None'}`
+            );
+          }
+          session.pendingResumes = [];
+          await SessionStore.saveSession(session);
+          reply = `✅ *Job Description received for ${profile.jobTitle}!*\n\n` + reviewReplies.join('\n\n');
+        } else {
+          reply = `✅ Job Description received for *${profile.jobTitle}* (Primary: ${profile.primaryTechnologies.join(', ')}).\n\nNow send your candidate resume!`;
+        }
+      }
     } else {
-      reply = `👋 Welcome to RoleFit AI on WhatsApp! Send me a Job Description to begin reviewing resumes.`;
+      const candidates = Object.values(session.candidates);
+      if (session.jdProfile && candidates.length > 0) {
+        const latestCandidate = candidates[candidates.length - 1];
+        reply = await geminiService.answerFollowUp(
+          session.jdProfile,
+          latestCandidate,
+          body,
+          session.messages.map((m) => ({ role: m.role, content: m.content }))
+        );
+      } else {
+        reply = `👋 Welcome to RoleFit AI on WhatsApp! Send me either a Job Description or a Resume to begin reviewing.`;
+      }
     }
 
     res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);

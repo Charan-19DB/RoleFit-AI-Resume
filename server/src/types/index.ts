@@ -127,6 +127,7 @@ export interface CandidateRankingItem {
 export interface SessionData {
   sessionId: string;
   jdProfile?: StructuredJDProfile;
+  pendingResumes?: { text: string; filename: string; candidateName: string }[];
   candidates: Record<string, ReviewObject>;
   rankings?: CandidateRankingItem[];
   messages: {

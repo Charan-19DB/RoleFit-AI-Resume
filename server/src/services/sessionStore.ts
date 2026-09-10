@@ -4,6 +4,7 @@ import { SessionData, StructuredJDProfile, ReviewObject, CandidateRankingItem } 
 interface ISessionDoc extends Document {
   sessionId: string;
   jdProfile?: StructuredJDProfile;
+  pendingResumes?: { text: string; filename: string; candidateName: string }[];
   candidates: Record<string, ReviewObject>;
   rankings?: CandidateRankingItem[];
   messages: { role: 'user' | 'assistant'; content: string; timestamp: string }[];
@@ -14,6 +15,7 @@ const SessionSchema = new Schema<ISessionDoc>(
   {
     sessionId: { type: String, required: true, unique: true, index: true },
     jdProfile: { type: Schema.Types.Mixed, default: null },
+    pendingResumes: { type: [Schema.Types.Mixed], default: [] },
     candidates: { type: Schema.Types.Mixed, default: {} },
     rankings: { type: [Schema.Types.Mixed], default: [] },
     messages: [
@@ -59,6 +61,7 @@ export class SessionStore {
         return {
           sessionId: doc.sessionId,
           jdProfile: doc.jdProfile,
+          pendingResumes: doc.pendingResumes || [],
           candidates: doc.candidates || {},
           rankings: doc.rankings || [],
           messages: doc.messages || [],
@@ -72,12 +75,16 @@ export class SessionStore {
     if (!session) {
       session = {
         sessionId,
+        pendingResumes: [],
         candidates: {},
         messages: [],
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
       memorySessions.set(sessionId, session);
+    }
+    if (!session.pendingResumes) {
+      session.pendingResumes = [];
     }
     return session;
   }
@@ -93,6 +100,7 @@ export class SessionStore {
           {
             sessionId: session.sessionId,
             jdProfile: session.jdProfile,
+            pendingResumes: session.pendingResumes || [],
             candidates: session.candidates,
             rankings: session.rankings,
             messages: session.messages,
@@ -110,6 +118,7 @@ export class SessionStore {
     session.jdProfile = profile;
     session.candidates = {};
     session.rankings = [];
+    // Note: Do NOT clear pendingResumes here because the caller will process them against the new JD profile!
     await this.saveSession(session);
     return session;
   }
