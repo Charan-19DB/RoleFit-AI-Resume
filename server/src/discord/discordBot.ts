@@ -7,6 +7,7 @@ import {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
+  Events,
 } from 'discord.js';
 import { GeminiService } from '../services/geminiService.js';
 import { DocumentParser } from '../parsers/documentParser.js';
@@ -34,7 +35,7 @@ export function setupDiscordBot(
     partials: [Partials.Channel, Partials.Message],
   });
 
-  client.once('ready', () => {
+  client.once(Events.ClientReady, () => {
     console.log(`🤖 Discord bot logged in as ${client.user?.tag}!`);
   });
 
