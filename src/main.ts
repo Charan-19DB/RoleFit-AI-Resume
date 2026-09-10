@@ -58,8 +58,8 @@ interface StructuredJDProfile {
 }
 
 const API_BASE = 'http://localhost:3001/api';
-let sessionId = localStorage.getItem('rolefit_wa_session') || `wa-${Date.now()}`;
-localStorage.setItem('rolefit_wa_session', sessionId);
+let sessionId = localStorage.getItem('rolefit_mobile_sess') || `mob-${Date.now()}`;
+localStorage.setItem('rolefit_mobile_sess', sessionId);
 
 let activeJD: StructuredJDProfile | null = null;
 let analyzedCandidates: ReviewObject[] = [];
@@ -67,81 +67,80 @@ let analyzedCandidates: ReviewObject[] = [];
 const app = document.querySelector<HTMLDivElement>('#app')!;
 
 app.innerHTML = `
-  <div class="app-container">
-    <!-- WhatsApp / Meta AI Header -->
-    <header class="chat-header">
-      <div class="header-left">
-        <div class="meta-logo">
-          <svg viewBox="0 0 24 24">
-            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9V8h2v8zm4 0h-2V8h2v8z"/>
+  <div class="app-shell">
+    <div class="app-container">
+      <!-- WhatsApp / Meta AI Mobile Header -->
+      <header class="chat-header">
+        <div class="header-left">
+          <div class="meta-logo">
+            <svg viewBox="0 0 24 24">
+              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9V8h2v8zm4 0h-2V8h2v8z"/>
+            </svg>
+          </div>
+          <div class="header-info">
+            <h1 id="header-title">RoleFit AI</h1>
+            <p id="header-status">online</p>
+          </div>
+        </div>
+        <div class="header-actions">
+          <button class="btn-new-chat" id="btn-new-session">+ New Role</button>
+        </div>
+      </header>
+
+      <!-- Chat Canvas (Scrollable Thread) -->
+      <main class="chat-canvas" id="chat-canvas">
+        <div class="date-pill">Today</div>
+
+        <!-- Welcome Message -->
+        <div class="msg-row incoming">
+          <div class="bubble">
+            <p>👋 <strong>RoleFit AI Career Reviewer</strong></p>
+            <p style="margin-top: 4px; color: var(--wa-text-secondary); font-size: 12.5px;">
+              Send a <strong>Job Description</strong> to start:
+            </p>
+            <p style="margin-top: 6px; font-size: 13px;">
+              • 📝 Paste JD text<br>
+              • 📎 Or attach a PDF/DOCX file
+            </p>
+            <div class="timestamp">${getCurrentTime()}</div>
+          </div>
+        </div>
+      </main>
+
+      <!-- Quick Suggestion Strip -->
+      <div class="suggestion-strip" id="suggestion-strip">
+        <button class="strip-chip" data-fill="We are hiring a Java Backend Developer with Spring Boot, SQL, and REST APIs. Python is preferred.">📝 Java Backend JD</button>
+        <button class="strip-chip" data-fill="Why did I get this score?">❓ Why this score?</button>
+        <button class="strip-chip" data-fill="Which bullet should I rewrite first?">✏️ Best rewrite</button>
+        <button class="strip-chip" data-fill="What should I learn next?">🎓 What to learn</button>
+      </div>
+
+      <!-- Mobile Input Bar -->
+      <footer class="chat-footer">
+        <button class="icon-btn" id="btn-attach" title="Attach PDF/DOCX file">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+            <path d="M16.5 6v11.5c0 2.21-1.79 4-4 4s-4-1.79-4-4V5a2.5 2.5 0 0 1 5 0v10.5c0 .83-.67 1.5-1.5 1.5s-1.5-.67-1.5-1.5V6H9v9.5a3 3 0 0 0 6 0V5c0-2.21-1.79-4-4-4S7 2.79 7 5v12.5c0 3.04 2.46 5.5 5.5 5.5s5.5-2.46 5.5-5.5V6h-1.5z"/>
           </svg>
-        </div>
-        <div class="header-info">
-          <h1 id="header-title">RoleFit AI</h1>
-          <p id="header-status">online · Recruiter & Career Reviewer</p>
-        </div>
-      </div>
-      <div class="header-actions">
-        <button class="btn-new-chat" id="btn-new-session">🔄 New Session</button>
-      </div>
-    </header>
+        </button>
+        <input type="file" id="file-input" class="hidden" accept=".pdf,.docx,.doc,.txt" multiple />
 
-    <!-- Chat Message Canvas -->
-    <main class="chat-canvas" id="chat-canvas">
-      <div class="date-pill">Today</div>
-
-      <!-- Welcome Message -->
-      <div class="msg-row incoming">
-        <div class="bubble">
-          <p>👋 <strong>Welcome to RoleFit AI</strong></p>
-          <p style="margin-top: 6px; color: var(--wa-text-secondary);">
-            <em>"Your resume. Their requirements. One honest review."</em>
-          </p>
-          <p style="margin-top: 10px;">
-            I am your recruitment intelligence mentor. To get started, send me a <strong>Job Description</strong>:
-          </p>
-          <ul style="margin: 8px 0 8px 20px; font-size: 13.5px; color: var(--wa-text-primary);">
-            <li>📝 <strong>Paste JD text</strong> directly into the message box</li>
-            <li>📎 Or <strong>attach a PDF/DOCX</strong> using the paperclip icon</li>
-          </ul>
-          <div class="timestamp">${getCurrentTime()}</div>
+        <div class="input-wrapper">
+          <input
+            type="text"
+            class="chat-input"
+            id="chat-input"
+            placeholder="Type a message..."
+            autocomplete="off"
+          />
         </div>
-      </div>
-    </main>
 
-    <!-- Suggestion Chips Bar -->
-    <div class="suggestion-bar" id="suggestion-bar">
-      <button class="chip" data-fill="We are hiring a Senior Java Developer with Spring Boot, SQL, REST APIs, and Docker. Python is a plus.">📝 Load Sample Java JD</button>
-      <button class="chip" data-fill="Why did I get this score?">❓ Why this score?</button>
-      <button class="chip" data-fill="How can I add testing evidence honestly?">🧪 Add testing honestly?</button>
-      <button class="chip" data-fill="What should I learn next for this role?">📚 What to learn?</button>
+        <button class="send-btn" id="btn-send" title="Send">
+          <svg viewBox="0 0 24 24">
+            <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+          </svg>
+        </button>
+      </footer>
     </div>
-
-    <!-- WhatsApp Input Bar -->
-    <footer class="chat-footer">
-      <button class="icon-btn" id="btn-attach" title="Attach JD or Resume (PDF/DOCX)">
-        <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
-          <path d="M16.5 6v11.5c0 2.21-1.79 4-4 4s-4-1.79-4-4V5a2.5 2.5 0 0 1 5 0v10.5c0 .83-.67 1.5-1.5 1.5s-1.5-.67-1.5-1.5V6H9v9.5a3 3 0 0 0 6 0V5c0-2.21-1.79-4-4-4S7 2.79 7 5v12.5c0 3.04 2.46 5.5 5.5 5.5s5.5-2.46 5.5-5.5V6h-1.5z"/>
-        </svg>
-      </button>
-      <input type="file" id="file-input" class="hidden" accept=".pdf,.docx,.doc,.txt" multiple />
-
-      <div class="input-wrapper">
-        <input
-          type="text"
-          class="chat-input"
-          id="chat-input"
-          placeholder="Type a message or paste a Job Description / Resume..."
-          autocomplete="off"
-        />
-      </div>
-
-      <button class="send-btn" id="btn-send" title="Send message">
-        <svg viewBox="0 0 24 24">
-          <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
-        </svg>
-      </button>
-    </footer>
   </div>
 `;
 
@@ -193,7 +192,7 @@ function appendUserMessage(text: string, filename?: string) {
         <div class="file-icon ${ext === 'DOCX' ? 'docx' : ''}">${ext}</div>
         <div class="file-meta">
           <strong>${filename}</strong>
-          <small>Document uploaded</small>
+          <small>Uploaded document</small>
         </div>
       </div>
     `;
@@ -223,7 +222,7 @@ function appendBotMessage(htmlContent: string) {
   scrollToBottom();
 }
 
-// 1. Process Job Description
+// 1. Process Job Description (Simple & Precise)
 async function handleJobDescription(text?: string, file?: File) {
   const typing = showTypingIndicator();
   try {
@@ -238,39 +237,36 @@ async function handleJobDescription(text?: string, file?: File) {
     if (res.ok) {
       const data = await res.json();
       activeJD = data.profile;
-      document.querySelector('#header-title')!.textContent = `RoleFit · ${activeJD?.jobTitle}`;
+      document.querySelector('#header-title')!.textContent = activeJD?.jobTitle.slice(0, 24) || 'RoleFit AI';
 
-      const critical = activeJD?.requirements.filter((r) => r.priority === 'CRITICAL').length || 0;
+      const crit = activeJD?.requirements.filter((r) => r.priority === 'CRITICAL').length || 0;
       const high = activeJD?.requirements.filter((r) => r.priority === 'HIGH').length || 0;
       const low = activeJD?.requirements.filter((r) => r.priority === 'LOW').length || 0;
 
       appendBotMessage(`
-        <p>✅ <strong>Job Description Received & Analyzed</strong></p>
-        <p style="margin-top: 4px; color: var(--wa-accent); font-weight: 600;">${activeJD?.jobTitle}</p>
-        <p style="font-size: 13px; color: var(--wa-text-secondary); margin-top: 4px;">
-          Primary Tech: <strong>${activeJD?.primaryTechnologies.join(', ')}</strong>
+        <p>✅ <strong>Role Analyzed:</strong> ${activeJD?.jobTitle}</p>
+        <p style="font-size: 12.5px; color: var(--wa-accent); margin-top: 3px;">
+          Primary Stack: <strong>${activeJD?.primaryTechnologies.join(', ')}</strong>
         </p>
-
-        <div style="display: flex; gap: 8px; margin: 10px 0; font-size: 12px;">
-          <span style="background: rgba(239, 68, 68, 0.2); color: #f87171; padding: 2px 8px; border-radius: 4px;">🔴 ${critical} Critical</span>
-          <span style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; padding: 2px 8px; border-radius: 4px;">🟠 ${high} Important</span>
-          <span style="background: rgba(59, 130, 246, 0.2); color: #60a5fa; padding: 2px 8px; border-radius: 4px;">🟡 ${low} Preferred</span>
+        <div style="display: flex; gap: 6px; margin: 8px 0; font-size: 11px;">
+          <span style="background: rgba(248, 113, 113, 0.2); color: #f87171; padding: 2px 6px; border-radius: 4px;">🔴 ${crit} Critical</span>
+          <span style="background: rgba(251, 191, 36, 0.2); color: #fbbf24; padding: 2px 6px; border-radius: 4px;">🟠 ${high} High</span>
+          <span style="background: rgba(59, 130, 246, 0.2); color: #60a5fa; padding: 2px 6px; border-radius: 4px;">🟡 ${low} Preferred</span>
         </div>
-
-        <p style="margin-top: 10px;">
-          👉 <strong>Now upload one or more resumes</strong> (PDF/DOCX) using the paperclip 📎 or paste resume text below to see an honest recruiter review!
+        <p style="font-size: 12.5px; color: var(--wa-text-secondary);">
+          👉 Attach or paste a <strong>Resume</strong> to get the match score.
         </p>
       `);
     } else {
-      appendBotMessage(`⚠️ Could not analyze Job Description. Please make sure the backend server is running.`);
+      appendBotMessage(`⚠️ Could not analyze JD. Please check your backend connection.`);
     }
   } catch (err: any) {
     removeTypingIndicator(typing);
-    appendBotMessage(`⚠️ Connection error: ${err.message}. Please check that the server is running at ${API_BASE}.`);
+    appendBotMessage(`⚠️ Error: ${err.message}`);
   }
 }
 
-// 2. Process Resume(s)
+// 2. Process Resume (Simple & Precise Score Parameters)
 async function handleResume(file?: File, text?: string) {
   const typing = showTypingIndicator();
   try {
@@ -286,9 +282,9 @@ async function handleResume(file?: File, text?: string) {
       const data = await res.json();
       const review: ReviewObject = data.review;
       analyzedCandidates.push(review);
-      renderCandidateReviewBubble(review);
+      renderPreciseScoreBubble(review);
     } else {
-      appendBotMessage(`⚠️ Failed to analyze resume. Please make sure a Job Description is active first.`);
+      appendBotMessage(`⚠️ Please submit a Job Description first.`);
     }
   } catch (err: any) {
     removeTypingIndicator(typing);
@@ -296,154 +292,112 @@ async function handleResume(file?: File, text?: string) {
   }
 }
 
-// Render Complete Humanized Recruiter Review with Graphical Meter
-function renderCandidateReviewBubble(review: ReviewObject) {
-  const circum = 2 * Math.PI * 28; // r=28
+// Render Simple & Precise Score Card
+function renderPreciseScoreBubble(review: ReviewObject) {
+  const circum = 2 * Math.PI * 24; // r=24
   const score = review.roleFit.score;
   const strokeOffset = circum - (score / 100) * circum;
 
+  const topStrength = review.recruitersEye.noticeFirst.slice(0, 2).join(' · ');
+  const topGap = review.whatToChangeBeforeApplying.length > 0
+    ? review.whatToChangeBeforeApplying[0].title
+    : (review.hasCriticalGap ? review.criticalGapMessage : 'Missing unstated testing metrics');
+
+  const rewrite = review.suggestedWording[0];
+  const nextSkill = review.learningPlan[0];
+
   const html = `
-    <!-- Graphical Representation Header -->
-    <div class="chart-widget">
-      <div class="role-fit-header">
-        <div class="role-fit-details">
-          <span style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--wa-accent); font-weight: 700;">
-            Role Fit Review · ${review.candidateName}
+    <!-- Simple & Precise Score Card -->
+    <div class="score-card">
+      <div class="score-header-row">
+        <div class="score-title-group">
+          <span style="font-size: 11px; text-transform: uppercase; color: var(--wa-text-muted); font-weight: 600;">
+            ${review.candidateName}
           </span>
-          <h3 style="margin-top: 2px;">${review.roleFit.verdict} — ${score}%</h3>
+          <h3>${review.roleFit.verdict}</h3>
           <p>${review.roleFit.summary}</p>
         </div>
 
-        <!-- Inline Radial Meter -->
-        <div class="radial-container">
-          <svg class="radial-svg" viewBox="0 0 72 72">
-            <circle class="radial-bg" cx="36" cy="36" r="28" fill="none" stroke-width="5" />
-            <circle class="radial-meter" cx="36" cy="36" r="28" fill="none" stroke-width="5"
+        <!-- Radial Score Meter -->
+        <div class="radial-ring">
+          <svg class="radial-svg" viewBox="0 0 58 58">
+            <circle class="radial-bg" cx="29" cy="29" r="24" fill="none" stroke-width="4.5" />
+            <circle class="radial-fill" cx="29" cy="29" r="24" fill="none" stroke-width="4.5"
               stroke-dasharray="${circum}" stroke-dashoffset="${strokeOffset}" />
           </svg>
-          <div class="radial-text">${score}<small>%</small></div>
+          <div class="radial-val">${score}<small>%</small></div>
         </div>
       </div>
 
-      <!-- Subscore Progress Bars -->
-      <div class="subscores-row">
-        <div class="subscore-item">
-          <span>Skills Match <strong>${review.subscores.skills}%</strong></span>
-          <div class="subscore-bar"><div class="subscore-fill" style="width: ${review.subscores.skills}%"></div></div>
+      <!-- 4 Score Parameters -->
+      <div class="param-grid">
+        <div class="param-box">
+          <span>Skills <strong>${review.subscores.skills}%</strong></span>
+          <div class="param-bar"><div class="param-fill" style="width: ${review.subscores.skills}%"></div></div>
         </div>
-        <div class="subscore-item">
-          <span>Experience Match <strong>${review.subscores.experience}%</strong></span>
-          <div class="subscore-bar"><div class="subscore-fill" style="width: ${review.subscores.experience}%"></div></div>
+        <div class="param-box">
+          <span>Experience <strong>${review.subscores.experience}%</strong></span>
+          <div class="param-bar"><div class="param-fill" style="width: ${review.subscores.experience}%"></div></div>
+        </div>
+        <div class="param-box">
+          <span>Keywords <strong>${review.subscores.keywords}%</strong></span>
+          <div class="param-bar"><div class="param-fill" style="width: ${review.subscores.keywords}%"></div></div>
+        </div>
+        <div class="param-box">
+          <span>ATS Format <strong>${review.subscores.formatting}%</strong></span>
+          <div class="param-bar"><div class="param-fill" style="width: ${review.subscores.formatting}%"></div></div>
         </div>
       </div>
-    </div>
 
-    <!-- Recruiter's Eye Section -->
-    <div class="bubble-section">
-      <div class="bubble-section-title">👀 Recruiter’s Eye</div>
-      <div class="recruiter-eye-box notice">
-        <strong>I’d Notice First:</strong>
-        ${review.recruitersEye.noticeFirst.join(' · ')}
+      <!-- Precise Highlights -->
+      <div class="precise-section">
+        <span class="section-label green">🟢 What Stands Out</span>
+        <p>${topStrength || 'Demonstrated foundational technical skills'}</p>
       </div>
-      <div class="recruiter-eye-box question">
-        <strong>I’d Question / Look For:</strong>
-        ${review.recruitersEye.question.join(' · ')}
+
+      <div class="precise-section">
+        <span class="section-label red">🔴 Key Gap</span>
+        <p>${topGap}</p>
       </div>
-    </div>
 
-    <!-- Resume ↔ Role Evidence Map -->
-    <div class="bubble-section">
-      <div class="bubble-section-title">📍 Grounded Evidence Map</div>
-      ${review.evidenceMap
-        .slice(0, 4)
-        .map((ev) => {
-          const badgeClass =
-            ev.status === 'STRONG_MATCH' || ev.status === 'GOOD_MATCH'
-              ? 'strong'
-              : ev.status === 'PARTIAL_MATCH'
-              ? 'partial'
-              : 'missing';
-          const label =
-            ev.status === 'STRONG_MATCH'
-              ? 'Strong Match'
-              : ev.status === 'GOOD_MATCH'
-              ? 'Good Match'
-              : ev.status === 'PARTIAL_MATCH'
-              ? 'Partial Match'
-              : 'Missing Evidence';
-          return `
-            <div class="evidence-item">
-              <span class="evidence-badge ${badgeClass}">${label}</span>
-              <div>
-                <strong>${ev.requirementName}</strong>
-                <p style="color: var(--wa-text-secondary); font-size: 12px; margin-top: 2px;">${ev.evidenceSnippet}</p>
-              </div>
-            </div>
-          `;
-        })
-        .join('')}
-    </div>
-
-    <!-- What I'd change before applying -->
-    <div class="bubble-section">
-      <div class="bubble-section-title">✏️ What I’d Change Before Applying</div>
-      ${review.whatToChangeBeforeApplying
-        .slice(0, 2)
-        .map(
-          (item, i) => `
-        <div style="margin-bottom: 8px; font-size: 13px;">
-          <strong>${i + 1}. ${item.title}</strong>
-          <p style="color: var(--wa-text-secondary); margin-top: 2px;">${item.reason} — <em>${item.action}</em></p>
-          <small style="color: var(--wa-warning); display: block; margin-top: 2px;">⚠️ Honesty: ${item.honestyNote}</small>
+      ${
+        rewrite
+          ? `
+        <div class="precise-section">
+          <span class="section-label blue">✏️ Quick Rewrite</span>
+          <div class="rewrite-snippet">
+            <strong>Before:</strong> "${rewrite.before}"<br>
+            <strong>Direction:</strong> "${rewrite.after}"
+          </div>
         </div>
       `
-        )
-        .join('')}
-    </div>
+          : ''
+      }
 
-    <!-- Suggested Wording (Truth-First) -->
-    ${
-      review.suggestedWording.length > 0
-        ? `
-      <div class="bubble-section">
-        <div class="bubble-section-title">📝 Suggested Truthful Rewrite</div>
-        <div class="rewrite-card">
-          <strong style="color: var(--wa-accent);">Before:</strong> "${review.suggestedWording[0].before}"<br>
-          <strong style="color: var(--wa-accent); display: inline-block; margin-top: 4px;">Suggested Direction:</strong> "${review.suggestedWording[0].after}"
-          <small>ℹ️ ${review.suggestedWording[0].guidance}</small>
+      ${
+        nextSkill
+          ? `
+        <div class="precise-section">
+          <span class="section-label" style="color: var(--wa-accent);">🎓 Next to Learn</span>
+          <p><strong>${nextSkill.topic}</strong> (${nextSkill.priority} Priority)</p>
         </div>
-      </div>
-    `
-        : ''
-    }
+      `
+          : ''
+      }
 
-    <!-- Top Learning Plan -->
-    ${
-      review.learningPlan.length > 0
-        ? `
-      <div class="bubble-section">
-        <div class="bubble-section-title">📚 What to Learn Next (Role Priority)</div>
-        <p style="font-size: 13px;">
-          1. <strong>${review.learningPlan[0].topic}</strong> (${review.learningPlan[0].priority} Priority)<br>
-          <span style="color: var(--wa-text-secondary); font-size: 12px;">${review.learningPlan[0].reason}</span>
-        </p>
+      <!-- Fast Action Buttons -->
+      <div class="chip-row">
+        <button class="mini-chip" data-ask="Which project bullet should I rewrite first?">✏️ Rewrites</button>
+        <button class="mini-chip" data-ask="Why did I get this score?">❓ Explain Score</button>
+        <button class="mini-chip" data-ask="What is my top learning priority?">📚 Learn</button>
       </div>
-    `
-        : ''
-    }
-
-    <!-- Interactive Action Buttons Inside Bubble -->
-    <div class="action-btn-row">
-      <button class="chat-action-btn" data-ask="Which project bullet should I rewrite first?">📝 Rewrite Bullets</button>
-      <button class="chat-action-btn" data-ask="What is my full learning plan for this role?">📚 Full Learning Plan</button>
-      <button class="chat-action-btn" data-ask="How can I add unstated testing evidence honestly?">🧪 Add Testing</button>
     </div>
   `;
 
   appendBotMessage(html);
 }
 
-// 3. Conversational Follow-up Q&A
+// 3. Conversational Follow-up (Concise & Helpful)
 async function handleChat(question: string) {
   appendUserMessage(question);
   const typing = showTypingIndicator();
@@ -463,11 +417,11 @@ async function handleChat(question: string) {
       const data = await res.json();
       appendBotMessage(`<p>${data.reply}</p>`);
     } else {
-      appendBotMessage(`<p>I’m keeping this grounded in your resume. Focus on making your strongest project sound like ownership with measurable outcomes.</p>`);
+      appendBotMessage(`<p>Focus on adding verifiable metrics to your strongest project and clarifying automated testing tools.</p>`);
     }
   } catch (err: any) {
     removeTypingIndicator(typing);
-    appendBotMessage(`<p>I’m keeping this grounded in your resume. Focus on making your strongest project sound like ownership with measurable outcomes.</p>`);
+    appendBotMessage(`<p>Focus on adding verifiable metrics to your strongest project and clarifying automated testing tools.</p>`);
   }
 }
 
@@ -513,8 +467,8 @@ fileInput.addEventListener('change', async () => {
 });
 
 btnNewSession.addEventListener('click', () => {
-  sessionId = `wa-${Date.now()}`;
-  localStorage.setItem('rolefit_wa_session', sessionId);
+  sessionId = `mob-${Date.now()}`;
+  localStorage.setItem('rolefit_mobile_sess', sessionId);
   activeJD = null;
   analyzedCandidates = [];
   document.querySelector('#header-title')!.textContent = 'RoleFit AI';
@@ -523,7 +477,7 @@ btnNewSession.addEventListener('click', () => {
     <div class="msg-row incoming">
       <div class="bubble">
         <p>🔄 <strong>Fresh session started.</strong></p>
-        <p style="margin-top: 6px;">Send me a Job Description (paste text or attach PDF/DOCX) to begin.</p>
+        <p style="margin-top: 4px; font-size: 13px;">Send me a Job Description (paste text or attach PDF/DOCX) to begin.</p>
         <div class="timestamp">${getCurrentTime()}</div>
       </div>
     </div>
@@ -533,13 +487,13 @@ btnNewSession.addEventListener('click', () => {
 // Dynamic chip click handlers
 document.addEventListener('click', (e) => {
   const target = e.target as HTMLElement;
-  if (target.classList.contains('chip')) {
+  if (target.classList.contains('strip-chip')) {
     const text = target.dataset.fill;
     if (text) {
       input.value = text;
       btnSend.click();
     }
-  } else if (target.classList.contains('chat-action-btn')) {
+  } else if (target.classList.contains('mini-chip')) {
     const question = target.dataset.ask;
     if (question) {
       handleChat(question);
