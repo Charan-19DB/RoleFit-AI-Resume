@@ -221,8 +221,8 @@ Return strictly JSON matching this structure:
       customEdits = fallback.customEdits;
     }
 
-    // Deterministic mathematical scoring
-    const scoringResult = ScoringService.calculateScore(profile, evidenceList);
+    // Deterministic mathematical scoring with multi-factor granular precision
+    const scoringResult = ScoringService.calculateScore(profile, evidenceList, resumeText);
 
     // Prioritized learning recommendations based strictly on JD priorities
     const learningPlan = CourseService.generateRecommendations(profile.requirements, evidenceList);

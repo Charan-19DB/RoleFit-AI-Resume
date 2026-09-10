@@ -99,6 +99,7 @@ export interface ReviewObject {
     experience: number;
     keywords: number;
     formatting: number;
+    metrics?: number;
   };
   recruitersEye: RecruiterEye;
   evidenceMap: CandidateEvidence[];

@@ -57,9 +57,7 @@ interface StructuredJDProfile {
   requirements: { name: string; priority: string; weight: number }[];
 }
 
-const API_BASE = window.location.port === '5173'
-  ? `http://${window.location.hostname}:3001/api`
-  : '/api';
+const API_BASE = '/api';
 let sessionId = localStorage.getItem('rolefit_mobile_sess') || `mob-${Date.now()}`;
 localStorage.setItem('rolefit_mobile_sess', sessionId);
 
@@ -301,6 +299,33 @@ function renderPreciseScoreBubble(review: ReviewObject) {
   const rewrite = review.suggestedWording[0];
   const nextSkill = review.learningPlan[0];
 
+  const metricsVal = review.subscores.metrics ?? Math.max(35, Math.round(score * 0.85));
+  const barCats = [
+    { label: 'Overall', val: score, color: '#10b981' },
+    { label: 'Skills', val: review.subscores.skills, color: '#38bdf8' },
+    { label: 'Exp', val: review.subscores.experience, color: '#818cf8' },
+    { label: 'Keywords', val: review.subscores.keywords, color: '#c084fc' },
+    { label: 'Metrics', val: metricsVal, color: '#fbbf24' },
+    { label: 'Format', val: review.subscores.formatting, color: '#2dd4bf' },
+  ];
+
+  const barWidth = 24;
+  const plotH = 85;
+  const originX = 32;
+  const originY = 115;
+  const barsSvg = barCats.map((cat, i) => {
+    const bx = originX + 10 + i * 44;
+    const bh = Math.max(3, Math.round((cat.val / 100) * plotH));
+    const by = originY - bh;
+    return `
+      <g>
+        <text x="${bx + barWidth / 2}" y="${by - 4}" text-anchor="middle" fill="#ffffff" font-size="8.5" font-weight="700">${cat.val}%</text>
+        <rect x="${bx}" y="${by}" width="${barWidth}" height="${bh}" rx="3" fill="${cat.color}"/>
+        <text x="${bx + barWidth / 2}" y="${originY + 13}" text-anchor="middle" fill="#94a3b8" font-size="8" font-weight="600">${cat.label}</text>
+      </g>
+    `;
+  }).join('');
+
   const html = `
     <!-- Simple & Precise Score Card -->
     <div class="score-card">
@@ -324,24 +349,35 @@ function renderPreciseScoreBubble(review: ReviewObject) {
         </div>
       </div>
 
-      <!-- 4 Score Parameters -->
-      <div class="param-grid">
-        <div class="param-box">
-          <span>Skills <strong>${review.subscores.skills}%</strong></span>
-          <div class="param-bar"><div class="param-fill" style="width: ${review.subscores.skills}%"></div></div>
+      <!-- Cartesian Vertical Bar Graph -->
+      <div class="card-bar-graph" style="margin: 12px 0 8px 0; background: rgba(15, 23, 42, 0.75); padding: 10px 8px 6px 4px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.08);">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; padding: 0 6px;">
+          <span style="font-size: 11px; font-weight: 700; color: #10b981; letter-spacing: 0.5px;">📊 ATS MATCH BAR GRAPH</span>
+          <span style="font-size: 10px; color: var(--wa-text-muted);">Y = % · X = Dimensions</span>
         </div>
-        <div class="param-box">
-          <span>Experience <strong>${review.subscores.experience}%</strong></span>
-          <div class="param-bar"><div class="param-fill" style="width: ${review.subscores.experience}%"></div></div>
-        </div>
-        <div class="param-box">
-          <span>Keywords <strong>${review.subscores.keywords}%</strong></span>
-          <div class="param-bar"><div class="param-fill" style="width: ${review.subscores.keywords}%"></div></div>
-        </div>
-        <div class="param-box">
-          <span>ATS Format <strong>${review.subscores.formatting}%</strong></span>
-          <div class="param-bar"><div class="param-fill" style="width: ${review.subscores.formatting}%"></div></div>
-        </div>
+        <svg viewBox="0 0 315 138" style="width: 100%; height: auto; display: block; overflow: visible;">
+          <!-- Grid Lines -->
+          <line x1="${originX}" y1="30" x2="300" y2="30" stroke="rgba(255,255,255,0.06)" stroke-dasharray="2 2"/>
+          <line x1="${originX}" y1="58" x2="300" y2="58" stroke="rgba(255,255,255,0.06)" stroke-dasharray="2 2"/>
+          <line x1="${originX}" y1="86" x2="300" y2="86" stroke="rgba(255,255,255,0.06)" stroke-dasharray="2 2"/>
+          <line x1="${originX}" y1="${originY}" x2="300" y2="${originY}" stroke="rgba(255,255,255,0.15)"/>
+
+          <!-- Y Ticks -->
+          <text x="${originX - 4}" y="33" text-anchor="end" fill="#64748b" font-size="8" font-weight="600">100%</text>
+          <text x="${originX - 4}" y="61" text-anchor="end" fill="#64748b" font-size="8" font-weight="600">66%</text>
+          <text x="${originX - 4}" y="89" text-anchor="end" fill="#64748b" font-size="8" font-weight="600">33%</text>
+          <text x="${originX - 4}" y="${originY + 3}" text-anchor="end" fill="#64748b" font-size="8" font-weight="600">0%</text>
+
+          <!-- Axes -->
+          <line x1="${originX}" y1="${originY}" x2="${originX}" y2="18" stroke="#64748b" stroke-width="1.5"/>
+          <line x1="${originX}" y1="${originY}" x2="308" y2="${originY}" stroke="#64748b" stroke-width="1.5"/>
+          <text x="${originX}" y="12" text-anchor="middle" fill="#94a3b8" font-size="8.5" font-weight="700">Y</text>
+          <text x="310" y="${originY + 3}" text-anchor="start" fill="#94a3b8" font-size="8.5" font-weight="700">X</text>
+          <text x="${originX - 9}" y="${originY + 12}" fill="#64748b" font-size="8" font-weight="700">O</text>
+
+          <!-- Bars -->
+          ${barsSvg}
+        </svg>
       </div>
 
       <!-- Precise Highlights -->

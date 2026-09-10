@@ -437,13 +437,13 @@ export function setupTelegramBot(
     const topRewrite = review.suggestedWording[0];
     const topSkill = review.learningPlan[0];
 
-    // 1. Send High-Resolution Visual Score Gauge Photo
+    // 1. Send High-Resolution Visual Cartesian Bar Graph Photo
     try {
-      const chartBuffer = ChartRenderer.generateScoreGaugePNG(review, jdTitle);
+      const chartBuffer = ChartRenderer.generateScoreBarChartPNG(review, jdTitle);
       await ctx.replyWithPhoto(
         { source: chartBuffer },
         {
-          caption: `📊 <b>RoleFit ATS Score Gauge:</b> <code>${escapeHtml(review.candidateName)}</code>\n🎯 Score: <b>${score}% · ${escapeHtml(review.roleFit.verdict)}</b>`,
+          caption: `📊 <b>RoleFit ATS Bar Graph:</b> <code>${escapeHtml(review.candidateName)}</code>\n🎯 Overall Fit: <b>${score}% · ${escapeHtml(review.roleFit.verdict)}</b>`,
           parse_mode: 'HTML',
         }
       );

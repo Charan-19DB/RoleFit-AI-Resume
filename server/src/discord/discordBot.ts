@@ -167,10 +167,10 @@ export function setupDiscordBot(
         }
       )
       .setColor(color)
-      .setImage('attachment://score-gauge.png');
+      .setImage('attachment://score-barchart.png');
 
-    const chartBuffer = ChartRenderer.generateScoreGaugePNG(review, jobTitle);
-    const attachment = new AttachmentBuilder(chartBuffer, { name: 'score-gauge.png' });
+    const chartBuffer = ChartRenderer.generateScoreBarChartPNG(review, jobTitle);
+    const attachment = new AttachmentBuilder(chartBuffer, { name: 'score-barchart.png' });
 
     await message.reply({ embeds: [embed], files: [attachment] });
   }
