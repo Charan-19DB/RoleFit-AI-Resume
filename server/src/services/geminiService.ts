@@ -19,7 +19,7 @@ export class GeminiService {
   private genAI: GoogleGenerativeAI | null = null;
   private modelName: string;
 
-  constructor(apiKey?: string, modelName: string = process.env.GEMINI_MODEL || 'gemini-2.5-flash') {
+  constructor(apiKey?: string, modelName: string = process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite') {
     if (apiKey && apiKey.trim().length > 0) {
       this.genAI = new GoogleGenerativeAI(apiKey.trim());
     }

@@ -421,32 +421,45 @@ export function setupTelegramBot(
     }
   });
 
-  // Clean, Simple & Precise Review Formatter (Single Photo Message with Bar Graph)
+  // Clean, Simple & Precise Review Formatter with Parameters & Points to Improve
   async function sendReviewMessage(ctx: any, review: ReviewObject, session: SessionData) {
     const score = review.roleFit.score;
     const jdTitle = session.jdProfile?.jobTitle || 'Target Role';
-    const topStrength = review.recruitersEye.noticeFirst[0] || 'Core technical foundation demonstrated.';
-    const topGap = review.whatToChangeBeforeApplying[0]
-      ? `${review.whatToChangeBeforeApplying[0].title}: ${review.whatToChangeBeforeApplying[0].action}`
+    const metricsScore = review.subscores.metrics ?? Math.max(35, Math.round(score * 0.85));
+
+    // Strengths
+    const strengths = review.recruitersEye.noticeFirst.slice(0, 2);
+
+    // Points to Improve / Weak Points
+    const rawGaps = review.whatToChangeBeforeApplying.slice(0, 2);
+    const gapsText = rawGaps.length > 0
+      ? rawGaps.map((g) => `• <b>${escapeHtml(g.title)}:</b> ${escapeHtml(g.action || g.reason)}`).join('\n')
       : review.hasCriticalGap && review.criticalGapMessage
-      ? review.criticalGapMessage
-      : 'Missing quantifiable production metrics & test coverage.';
+      ? `• <b>Critical Gap:</b> ${escapeHtml(review.criticalGapMessage)}`
+      : `• <b>Metrics:</b> Add quantifiable production outcomes and scale.\n• <b>Testing:</b> Explicitly mention testing & CI/CD tools used.`;
+
     const topRewrite = review.suggestedWording[0];
 
     const cleanCaption = [
-      `🎯 <b>ATS Match: ${score}/100</b> · <b>${escapeHtml(review.roleFit.verdict)}</b>`,
+      `🎯 <b>ATS Match: ${score}/100</b> [${getScoreBadge(score)} <b>${escapeHtml(review.roleFit.verdict)}</b>]`,
       `👤 <b>Candidate:</b> <code>${escapeHtml(review.candidateName)}</code>`,
       `💼 <b>Target Role:</b> <b>${escapeHtml(jdTitle)}</b>`,
       ``,
-      `🟢 <b>Top Strength:</b>`,
-      `• ${escapeHtml(topStrength)}`,
+      `📊 <b>ATS Parameters:</b>`,
+      `• Skills: <b>${review.subscores.skills}%</b> · Exp: <b>${review.subscores.experience}%</b>`,
+      `• Keywords: <b>${review.subscores.keywords}%</b> · Metrics: <b>${metricsScore}%</b> · Format: <b>${review.subscores.formatting}%</b>`,
       ``,
-      `🔴 <b>Key Gap to Fix:</b>`,
-      `• ${escapeHtml(topGap)}`,
+      `🟢 <b>Strengths:</b>`,
+      ...(strengths.length > 0
+        ? strengths.map((s) => `• ${escapeHtml(s)}`)
+        : ['• Core technical skill foundation demonstrated.']),
+      ``,
+      `🔴 <b>Points to Improve (Weak Points):</b>`,
+      gapsText,
       ...(topRewrite
         ? [
             ``,
-            `✍️ <b>Suggested Rewrite:</b>`,
+            `✍️ <b>Suggested Bullet Rewrite:</b>`,
             `<i>"${escapeHtml(topRewrite.after)}"</i>`,
           ]
         : []),
